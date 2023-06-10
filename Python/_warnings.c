@@ -198,7 +198,7 @@ get_warnings_attr(PyInterpreterState *interp, PyObject *attr, int try_import)
     PyObject *warnings_module, *obj;
 
     /* don't try to import after the start of the Python finallization */
-    if (try_import && !_Py_IsFinalizing()) {
+    if (try_import && !_Py_IsInterpreterFinalizing(interp)) {
         warnings_module = PyImport_Import(&_Py_ID(warnings));
         if (warnings_module == NULL) {
             /* Fallback to the C implementation if we cannot get
@@ -214,7 +214,7 @@ get_warnings_attr(PyInterpreterState *interp, PyObject *attr, int try_import)
            gone, then we can't even use PyImport_GetModule without triggering
            an interpreter abort.
         */
-        if (!interp->modules) {
+        if (!_PyImport_GetModules(interp)) {
             return NULL;
         }
         warnings_module = PyImport_GetModule(&_Py_ID(warnings));
@@ -1050,7 +1050,6 @@ warnings_warn_impl(PyObject *module, PyObject *message, PyObject *category,
 static PyObject *
 get_source_line(PyInterpreterState *interp, PyObject *module_globals, int lineno)
 {
-    PyObject *external;
     PyObject *loader;
     PyObject *module_name;
     PyObject *get_source;
@@ -1059,13 +1058,7 @@ get_source_line(PyInterpreterState *interp, PyObject *module_globals, int lineno
     PyObject *source_line;
 
     /* stolen from import.c */
-    external = PyObject_GetAttrString(interp->importlib, "_bootstrap_external");
-    if (external == NULL) {
-        return NULL;
-    }
-
-    loader = PyObject_CallMethod(external, "_bless_my_loader", "O", module_globals, NULL);
-    Py_DECREF(external);
+    loader = _PyImport_BlessMyLoader(interp, module_globals);
     if (loader == NULL) {
         return NULL;
     }
@@ -1456,6 +1449,7 @@ warnings_module_exec(PyObject *module)
 
 static PyModuleDef_Slot warnings_slots[] = {
     {Py_mod_exec, warnings_module_exec},
+    {Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED},
     {0, NULL}
 };
 
