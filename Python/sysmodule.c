@@ -2277,7 +2277,10 @@ PyAPI_FUNC(int) PyUnstable_PerfMapState_Init(void) {
     char filename[100];
     pid_t pid = getpid();
     // Use nofollow flag to prevent symlink attacks.
-    int flags = O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC;
+    int flags = O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW;
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
     snprintf(filename, sizeof(filename) - 1, "/tmp/perf-%jd.map",
                 (intmax_t)pid);
     int fd = open(filename, flags, 0600);
@@ -2718,14 +2721,20 @@ _PySys_AddXOptionWithError(const wchar_t *s)
     const wchar_t *name_end = wcschr(s, L'=');
     if (!name_end) {
         name = PyUnicode_FromWideChar(s, -1);
+        if (name == NULL) {
+            goto error;
+        }
         value = Py_NewRef(Py_True);
     }
     else {
         name = PyUnicode_FromWideChar(s, name_end - s);
+        if (name == NULL) {
+            goto error;
+        }
         value = PyUnicode_FromWideChar(name_end + 1, -1);
-    }
-    if (name == NULL || value == NULL) {
-        goto error;
+        if (value == NULL) {
+            goto error;
+        }
     }
     if (PyDict_SetItem(opts, name, value) < 0) {
         goto error;
@@ -3365,19 +3374,25 @@ err_occurred:
 static int
 sys_add_xoption(PyObject *opts, const wchar_t *s)
 {
-    PyObject *name, *value;
+    PyObject *name, *value = NULL;
 
     const wchar_t *name_end = wcschr(s, L'=');
     if (!name_end) {
         name = PyUnicode_FromWideChar(s, -1);
+        if (name == NULL) {
+            goto error;
+        }
         value = Py_NewRef(Py_True);
     }
     else {
         name = PyUnicode_FromWideChar(s, name_end - s);
+        if (name == NULL) {
+            goto error;
+        }
         value = PyUnicode_FromWideChar(name_end + 1, -1);
-    }
-    if (name == NULL || value == NULL) {
-        goto error;
+        if (value == NULL) {
+            goto error;
+        }
     }
     if (PyDict_SetItem(opts, name, value) < 0) {
         goto error;

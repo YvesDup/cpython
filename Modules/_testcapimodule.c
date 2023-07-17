@@ -641,6 +641,30 @@ test_get_type_qualname(PyObject *self, PyObject *Py_UNUSED(ignored))
 }
 
 static PyObject *
+test_get_type_dict(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    /* Test for PyType_GetDict */
+
+    // Assert ints have a `to_bytes` method
+    PyObject *long_dict = PyType_GetDict(&PyLong_Type);
+    assert(long_dict);
+    assert(PyDict_GetItemString(long_dict, "to_bytes")); // borrowed ref
+    Py_DECREF(long_dict);
+
+    // Make a new type, add an attribute to it and assert it's there
+    PyObject *HeapTypeNameType = PyType_FromSpec(&HeapTypeNameType_Spec);
+    assert(HeapTypeNameType);
+    assert(PyObject_SetAttrString(
+        HeapTypeNameType, "new_attr", Py_NewRef(Py_None)) >= 0);
+    PyObject *type_dict = PyType_GetDict((PyTypeObject*)HeapTypeNameType);
+    assert(type_dict);
+    assert(PyDict_GetItemString(type_dict, "new_attr")); // borrowed ref
+    Py_DECREF(HeapTypeNameType);
+    Py_DECREF(type_dict);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 pyobject_repr_from_null(PyObject *self, PyObject *Py_UNUSED(ignored))
 {
     return PyObject_Repr(NULL);
@@ -1426,7 +1450,7 @@ run_in_subinterp_with_config(PyObject *self, PyObject *args, PyObject *kwargs)
     int allow_threads = -1;
     int allow_daemon_threads = -1;
     int check_multi_interp_extensions = -1;
-    int own_gil = -1;
+    int gil = -1;
     int r;
     PyThreadState *substate, *mainstate;
     /* only initialise 'cflags.cf_flags' to test backwards compatibility */
@@ -1439,15 +1463,15 @@ run_in_subinterp_with_config(PyObject *self, PyObject *args, PyObject *kwargs)
                              "allow_threads",
                              "allow_daemon_threads",
                              "check_multi_interp_extensions",
-                             "own_gil",
+                             "gil",
                              NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwargs,
-                    "s$ppppppp:run_in_subinterp_with_config", kwlist,
+                    "s$ppppppi:run_in_subinterp_with_config", kwlist,
                     &code, &use_main_obmalloc,
                     &allow_fork, &allow_exec,
                     &allow_threads, &allow_daemon_threads,
                     &check_multi_interp_extensions,
-                    &own_gil)) {
+                    &gil)) {
         return NULL;
     }
     if (use_main_obmalloc < 0) {
@@ -1466,8 +1490,8 @@ run_in_subinterp_with_config(PyObject *self, PyObject *args, PyObject *kwargs)
         PyErr_SetString(PyExc_ValueError, "missing allow_threads");
         return NULL;
     }
-    if (own_gil < 0) {
-        PyErr_SetString(PyExc_ValueError, "missing own_gil");
+    if (gil < 0) {
+        PyErr_SetString(PyExc_ValueError, "missing gil");
         return NULL;
     }
     if (allow_daemon_threads < 0) {
@@ -1490,7 +1514,7 @@ run_in_subinterp_with_config(PyObject *self, PyObject *args, PyObject *kwargs)
         .allow_threads = allow_threads,
         .allow_daemon_threads = allow_daemon_threads,
         .check_multi_interp_extensions = check_multi_interp_extensions,
-        .own_gil = own_gil,
+        .gil = gil,
     };
     PyStatus status = Py_NewInterpreterFromConfig(&substate, &config);
     if (PyStatus_Exception(status)) {
@@ -3347,6 +3371,7 @@ static PyMethodDef TestMethods[] = {
     {"test_get_statictype_slots", test_get_statictype_slots,     METH_NOARGS},
     {"test_get_type_name",        test_get_type_name,            METH_NOARGS},
     {"test_get_type_qualname",    test_get_type_qualname,        METH_NOARGS},
+    {"test_get_type_dict",        test_get_type_dict,            METH_NOARGS},
     {"_test_thread_state",      test_thread_state,               METH_VARARGS},
 #ifndef MS_WINDOWS
     {"_spawn_pthread_waiter",   spawn_pthread_waiter,            METH_NOARGS},

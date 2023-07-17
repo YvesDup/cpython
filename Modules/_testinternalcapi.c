@@ -15,14 +15,17 @@
 #include "frameobject.h"
 #include "pycore_atomic_funcs.h" // _Py_atomic_int_get()
 #include "pycore_bitutils.h"     // _Py_bswap32()
+#include "pycore_bytesobject.h"  // _PyBytes_Find()
 #include "pycore_compile.h"      // _PyCompile_CodeGen, _PyCompile_OptimizeCfg, _PyCompile_Assemble
+#include "pycore_ceval.h"        // _PyEval_AddPendingCall
 #include "pycore_fileutils.h"    // _Py_normpath
 #include "pycore_frame.h"        // _PyInterpreterFrame
 #include "pycore_gc.h"           // PyGC_Head
 #include "pycore_hashtable.h"    // _Py_hashtable_new()
 #include "pycore_initconfig.h"   // _Py_GetConfigsAsDict()
-#include "pycore_pathconfig.h"   // _PyPathConfig_ClearGlobal()
 #include "pycore_interp.h"       // _PyInterpreterState_GetConfigCopy()
+#include "pycore_interpreteridobject.h"  // _PyInterpreterID_LookUp()
+#include "pycore_pathconfig.h"   // _PyPathConfig_ClearGlobal()
 #include "pycore_pyerrors.h"     // _Py_UTF8_Edit_Cost()
 #include "pycore_pystate.h"      // _PyThreadState_GET()
 #include "osdefs.h"              // MAXPATHLEN
@@ -439,6 +442,118 @@ test_edit_cost(PyObject *self, PyObject *Py_UNUSED(args))
 }
 
 
+static int
+check_bytes_find(const char *haystack0, const char *needle0,
+                 int offset, Py_ssize_t expected)
+{
+    Py_ssize_t len_haystack = strlen(haystack0);
+    Py_ssize_t len_needle = strlen(needle0);
+    Py_ssize_t result_1 = _PyBytes_Find(haystack0, len_haystack,
+                                        needle0, len_needle, offset);
+    if (result_1 != expected) {
+        PyErr_Format(PyExc_AssertionError,
+                    "Incorrect result_1: '%s' in '%s' (offset=%zd)",
+                    needle0, haystack0, offset);
+        return -1;
+    }
+    // Allocate new buffer with no NULL terminator.
+    char *haystack = PyMem_Malloc(len_haystack);
+    if (haystack == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    char *needle = PyMem_Malloc(len_needle);
+    if (needle == NULL) {
+        PyMem_Free(haystack);
+        PyErr_NoMemory();
+        return -1;
+    }
+    memcpy(haystack, haystack0, len_haystack);
+    memcpy(needle, needle0, len_needle);
+    Py_ssize_t result_2 = _PyBytes_Find(haystack, len_haystack,
+                                        needle, len_needle, offset);
+    PyMem_Free(haystack);
+    PyMem_Free(needle);
+    if (result_2 != expected) {
+        PyErr_Format(PyExc_AssertionError,
+                    "Incorrect result_2: '%s' in '%s' (offset=%zd)",
+                    needle0, haystack0, offset);
+        return -1;
+    }
+    return 0;
+}
+
+static int
+check_bytes_find_large(Py_ssize_t len_haystack, Py_ssize_t len_needle,
+                       const char *needle)
+{
+    char *zeros = PyMem_RawCalloc(len_haystack, 1);
+    if (zeros == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    Py_ssize_t res = _PyBytes_Find(zeros, len_haystack, needle, len_needle, 0);
+    PyMem_RawFree(zeros);
+    if (res != -1) {
+        PyErr_Format(PyExc_AssertionError,
+                    "check_bytes_find_large(%zd, %zd) found %zd",
+                    len_haystack, len_needle, res);
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *
+test_bytes_find(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    #define CHECK(H, N, O, E) do {               \
+        if (check_bytes_find(H, N, O, E) < 0) {  \
+            return NULL;                         \
+        }                                        \
+    } while (0)
+
+    CHECK("", "", 0, 0);
+    CHECK("Python", "", 0, 0);
+    CHECK("Python", "", 3, 3);
+    CHECK("Python", "", 6, 6);
+    CHECK("Python", "yth", 0, 1);
+    CHECK("ython", "yth", 1, 1);
+    CHECK("thon", "yth", 2, -1);
+    CHECK("Python", "thon", 0, 2);
+    CHECK("ython", "thon", 1, 2);
+    CHECK("thon", "thon", 2, 2);
+    CHECK("hon", "thon", 3, -1);
+    CHECK("Pytho", "zz", 0, -1);
+    CHECK("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "ab", 0, -1);
+    CHECK("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "ba", 0, -1);
+    CHECK("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bb", 0, -1);
+    CHECK("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "ab", 0, 30);
+    CHECK("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaba", "ba", 0, 30);
+    CHECK("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb", "bb", 0, 30);
+    #undef CHECK
+
+    // Hunt for segfaults
+    // n, m chosen here so that (n - m) % (m + 1) == 0
+    // This would make default_find in fastsearch.h access haystack[n].
+    if (check_bytes_find_large(2048, 2, "ab") < 0) {
+        return NULL;
+    }
+    if (check_bytes_find_large(4096, 16, "0123456789abcdef") < 0) {
+        return NULL;
+    }
+    if (check_bytes_find_large(8192, 2, "ab") < 0) {
+        return NULL;
+    }
+    if (check_bytes_find_large(16384, 4, "abcd") < 0) {
+        return NULL;
+    }
+    if (check_bytes_find_large(32768, 2, "ab") < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
 static PyObject *
 normalize_path(PyObject *self, PyObject *filename)
 {
@@ -822,6 +937,120 @@ iframe_getlasti(PyObject *self, PyObject *frame)
     return PyLong_FromLong(PyUnstable_InterpreterFrame_GetLasti(f));
 }
 
+
+static int _pending_callback(void *arg)
+{
+    /* we assume the argument is callable object to which we own a reference */
+    PyObject *callable = (PyObject *)arg;
+    PyObject *r = PyObject_CallNoArgs(callable);
+    Py_DECREF(callable);
+    Py_XDECREF(r);
+    return r != NULL ? 0 : -1;
+}
+
+/* The following requests n callbacks to _pending_callback.  It can be
+ * run from any python thread.
+ */
+static PyObject *
+pending_threadfunc(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *callable;
+    int ensure_added = 0;
+    static char *kwlist[] = {"", "ensure_added", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs,
+                                     "O|$p:pending_threadfunc", kwlist,
+                                     &callable, &ensure_added))
+    {
+        return NULL;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+
+    /* create the reference for the callbackwhile we hold the lock */
+    Py_INCREF(callable);
+
+    int r;
+    Py_BEGIN_ALLOW_THREADS
+    r = _PyEval_AddPendingCall(interp, &_pending_callback, callable, 0);
+    Py_END_ALLOW_THREADS
+    if (r < 0) {
+        /* unsuccessful add */
+        if (!ensure_added) {
+            Py_DECREF(callable);
+            Py_RETURN_FALSE;
+        }
+        do {
+            Py_BEGIN_ALLOW_THREADS
+            r = _PyEval_AddPendingCall(interp, &_pending_callback, callable, 0);
+            Py_END_ALLOW_THREADS
+        } while (r < 0);
+    }
+
+    Py_RETURN_TRUE;
+}
+
+
+static struct {
+    int64_t interpid;
+} pending_identify_result;
+
+static int
+_pending_identify_callback(void *arg)
+{
+    PyThread_type_lock mutex = (PyThread_type_lock)arg;
+    assert(pending_identify_result.interpid == -1);
+    PyThreadState *tstate = PyThreadState_Get();
+    pending_identify_result.interpid = PyInterpreterState_GetID(tstate->interp);
+    PyThread_release_lock(mutex);
+    return 0;
+}
+
+static PyObject *
+pending_identify(PyObject *self, PyObject *args)
+{
+    PyObject *interpid;
+    if (!PyArg_ParseTuple(args, "O:pending_identify", &interpid)) {
+        return NULL;
+    }
+    PyInterpreterState *interp = _PyInterpreterID_LookUp(interpid);
+    if (interp == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_ValueError, "interpreter not found");
+        }
+        return NULL;
+    }
+
+    pending_identify_result.interpid = -1;
+
+    PyThread_type_lock mutex = PyThread_allocate_lock();
+    if (mutex == NULL) {
+        return NULL;
+    }
+    PyThread_acquire_lock(mutex, WAIT_LOCK);
+    /* It gets released in _pending_identify_callback(). */
+
+    int r;
+    do {
+        Py_BEGIN_ALLOW_THREADS
+        r = _PyEval_AddPendingCall(interp,
+                                   &_pending_identify_callback, (void *)mutex,
+                                   0);
+        Py_END_ALLOW_THREADS
+    } while (r < 0);
+
+    /* Wait for the pending call to complete. */
+    PyThread_acquire_lock(mutex, WAIT_LOCK);
+    PyThread_release_lock(mutex);
+    PyThread_free_lock(mutex);
+
+    PyObject *res = PyLong_FromLongLong(pending_identify_result.interpid);
+    pending_identify_result.interpid = -1;
+    if (res == NULL) {
+        return NULL;
+    }
+    return res;
+}
+
+
 static PyMethodDef module_functions[] = {
     {"get_configs", get_configs, METH_NOARGS},
     {"get_recursion_depth", get_recursion_depth, METH_NOARGS},
@@ -834,6 +1063,7 @@ static PyMethodDef module_functions[] = {
     {"reset_path_config", test_reset_path_config, METH_NOARGS},
     {"test_atomic_funcs", test_atomic_funcs, METH_NOARGS},
     {"test_edit_cost", test_edit_cost, METH_NOARGS},
+    {"test_bytes_find", test_bytes_find, METH_NOARGS},
     {"normalize_path", normalize_path, METH_O, NULL},
     {"get_getpath_codeobject", get_getpath_codeobject, METH_NOARGS, NULL},
     {"EncodeLocaleEx", encode_locale_ex, METH_VARARGS},
@@ -850,6 +1080,9 @@ static PyMethodDef module_functions[] = {
     {"iframe_getcode", iframe_getcode, METH_O, NULL},
     {"iframe_getline", iframe_getline, METH_O, NULL},
     {"iframe_getlasti", iframe_getlasti, METH_O, NULL},
+    {"pending_threadfunc", _PyCFunction_CAST(pending_threadfunc),
+     METH_VARARGS | METH_KEYWORDS},
+    {"pending_identify", pending_identify, METH_VARARGS, NULL},
     {NULL, NULL} /* sentinel */
 };
 

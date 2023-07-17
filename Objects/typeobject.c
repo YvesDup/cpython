@@ -238,6 +238,13 @@ _PyType_GetDict(PyTypeObject *self)
     return lookup_tp_dict(self);
 }
 
+PyObject *
+PyType_GetDict(PyTypeObject *self)
+{
+    PyObject *dict = lookup_tp_dict(self);
+    return _Py_XNewRef(dict);
+}
+
 static inline void
 set_tp_dict(PyTypeObject *self, PyObject *dict)
 {
@@ -1507,10 +1514,13 @@ type_set_annotations(PyTypeObject *type, PyObject *value, void *context)
 static PyObject *
 type_get_type_params(PyTypeObject *type, void *context)
 {
-    PyObject *params = PyDict_GetItem(lookup_tp_dict(type), &_Py_ID(__type_params__));
+    PyObject *params = PyDict_GetItemWithError(lookup_tp_dict(type), &_Py_ID(__type_params__));
 
     if (params) {
         return Py_NewRef(params);
+    }
+    if (PyErr_Occurred()) {
+        return NULL;
     }
 
     return PyTuple_New(0);
@@ -4236,7 +4246,7 @@ _PyType_FromMetaclass_impl(
                      metaclass);
         goto finally;
     }
-    if (metaclass->tp_new != PyType_Type.tp_new) {
+    if (metaclass->tp_new && metaclass->tp_new != PyType_Type.tp_new) {
         if (_allow_tp_new) {
             if (PyErr_WarnFormat(
                     PyExc_DeprecationWarning, 1,
