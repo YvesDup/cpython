@@ -1,15 +1,12 @@
-dnl ***************************************************
-dnl * Please run autoreconf -if to test your changes! *
-dnl ***************************************************
+dnl ************************************************************
+dnl * Please run autoreconf -ivf -Werror to test your changes! *
+dnl ************************************************************
 dnl
 dnl Python's configure script requires autoconf 2.71, autoconf-archive,
-dnl pkgconf's m4 macros.
+dnl aclocal 1.16, and pkg-config.
 dnl
-dnl It is recommended to use a cpython_autoconf container to regenerate the
-dnl configure script:
-dnl
-dnl podman run --rm --pull=always -v $(pwd):/src:Z quay.io/tiran/cpython_autoconf:271
-dnl docker run --rm --pull=always -v $(pwd):/src quay.io/tiran/cpython_autoconf:271
+dnl It is recommended to use the Tools/build/regen-configure.sh shell script
+dnl to regenerate the configure script.
 dnl
 
 # Set VERSION so we only need to edit in one place (i.e., here)
@@ -590,6 +587,14 @@ then
 	darwin*) MACHDEP="darwin";;
 	'')	MACHDEP="unknown";;
     esac
+
+    if test "$ac_sys_system" = "SunOS"; then
+	# For Solaris, there isn't an OS version specific macro defined
+	# in most compilers, so we define one here.
+	SUNOS_VERSION=`echo $ac_sys_release | sed -e 's!\.\([0-9]\)$!.0\1!g' | tr -d '.'`
+	AC_DEFINE_UNQUOTED([Py_SUNOS_VERSION], [$SUNOS_VERSION],
+	                   [The version of SunOS/Solaris as reported by `uname -r' without the dot.])
+    fi
 fi
 AC_MSG_RESULT(["$MACHDEP"])
 
@@ -1079,7 +1084,11 @@ cat > conftest.c <<EOF
 #  if defined(__EMSCRIPTEN__)
 	wasm32-emscripten
 #  elif defined(__wasi__)
+#    if defined(_REENTRANT)
+	wasm32-wasi-threads
+#    else
 	wasm32-wasi
+#    endif
 #  else
 #    error unknown wasm32 platform
 #  endif
@@ -1272,7 +1281,7 @@ AC_ARG_ENABLE([wasm-pthreads],
 [
   AS_CASE([$ac_sys_system],
     [Emscripten], [],
-    [WASI], [AC_MSG_ERROR([WASI threading is not implemented yet.])],
+    [WASI], [],
     [AC_MSG_ERROR([--enable-wasm-pthreads only applies to Emscripten and WASI])]
   )
 ], [
@@ -2309,6 +2318,23 @@ AS_CASE([$ac_sys_system],
     LIBS="$LIBS -lwasi-emulated-signal -lwasi-emulated-getpid -lwasi-emulated-process-clocks"
     echo "#define _WASI_EMULATED_SIGNAL 1" >> confdefs.h
 
+    AS_VAR_IF([enable_wasm_pthreads], [yes], [
+      # Note: update CFLAGS because ac_compile/ac_link needs this too.
+      # without this, configure fails to find pthread_create, sem_init,
+      # etc because they are only available in the sysroot for
+      # wasm32-wasi-threads.
+      # Note: wasi-threads requires --import-memory.
+      # Note: wasi requires --export-memory.
+      # Note: --export-memory is implicit unless --import-memory is given
+      # Note: this requires LLVM >= 16.
+      AS_VAR_APPEND([CFLAGS], [" -target wasm32-wasi-threads -pthread"])
+      AS_VAR_APPEND([CFLAGS_NODIST], [" -target wasm32-wasi-threads -pthread"])
+      AS_VAR_APPEND([LDFLAGS_NODIST], [" -target wasm32-wasi-threads -pthread"])
+      AS_VAR_APPEND([LDFLAGS_NODIST], [" -Wl,--import-memory"])
+      AS_VAR_APPEND([LDFLAGS_NODIST], [" -Wl,--export-memory"])
+      AS_VAR_APPEND([LDFLAGS_NODIST], [" -Wl,--max-memory=10485760"])
+    ])
+
     dnl increase initial memory and stack size, move stack first
     dnl https://github.com/WebAssembly/wasi-libc/issues/233
     AS_VAR_APPEND([LDFLAGS_NODIST], [" -z stack-size=524288 -Wl,--stack-first -Wl,--initial-memory=10485760"])
@@ -2640,6 +2666,9 @@ yes)
 esac
 
 case "$CC" in
+*mpicc*)
+    CFLAGS_NODIST="$CFLAGS_NODIST"
+    ;;
 *icc*)
     # ICC needs -fp-model strict or floats behave badly
     CFLAGS_NODIST="$CFLAGS_NODIST -fp-model strict"
@@ -2829,7 +2858,7 @@ AC_DEFINE([STDC_HEADERS], [1],
 # checks for header files
 AC_CHECK_HEADERS([ \
   alloca.h asm/types.h bluetooth.h conio.h crypt.h direct.h dlfcn.h endian.h errno.h fcntl.h grp.h \
-  ieeefp.h io.h langinfo.h libintl.h libutil.h linux/auxvec.h sys/auxv.h linux/fs.h linux/memfd.h \
+  ieeefp.h io.h langinfo.h libintl.h libutil.h linux/auxvec.h sys/auxv.h linux/fs.h linux/limits.h linux/memfd.h \
   linux/random.h linux/soundcard.h \
   linux/tipc.h linux/wait.h netdb.h net/ethernet.h netinet/in.h netpacket/packet.h poll.h process.h pthread.h pty.h \
   sched.h setjmp.h shadow.h signal.h spawn.h stropts.h sys/audioio.h sys/bsdtty.h sys/devpoll.h \
@@ -6194,6 +6223,13 @@ AS_VAR_IF([with_readline], [no], [
       AC_DEFINE([HAVE_RL_APPEND_HISTORY], [1], [Define if readline supports append_history])
     ])
 
+    # in readline as well as newer editline (April 2023)
+    AC_CHECK_TYPE([rl_compdisp_func_t],
+                  [AC_DEFINE([HAVE_RL_COMPDISP_FUNC_T], [1],
+                             [Define if readline supports rl_compdisp_func_t])],
+                  [],
+                  [readline_includes])
+
     m4_undefine([readline_includes])
   ])dnl WITH_SAVE_ENV()
 ])
@@ -6400,9 +6436,11 @@ dnl remove _XOPEN_SOURCE macro from curses cflags. pyconfig.h sets
 dnl the macro to 700.
 CURSES_CFLAGS=$(echo $CURSES_CFLAGS | sed 's/-D_XOPEN_SOURCE=600//g')
 
-if test "$have_curses" = no -a "$ac_sys_system" = "Darwin"; then
+if test "$have_curses" != no -a "$ac_sys_system" = "Darwin"; then
   dnl On macOS, there is no separate /usr/lib/libncursesw nor libpanelw.
-  dnl If we are here, we found a locally-supplied version of libncursesw.
+  dnl System-supplied ncurses combines libncurses/libpanel and supports wide
+  dnl characters, so we can use it like ncursesw.
+  dnl If a locally-supplied version of libncursesw is found, we will use that.
   dnl There should also be a libpanelw.
   dnl _XOPEN_SOURCE defines are usually excluded for macOS, but we need
   dnl _XOPEN_SOURCE_EXTENDED here for ncurses wide char support.

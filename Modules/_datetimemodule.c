@@ -4620,7 +4620,7 @@ time_fromisoformat(PyObject *cls, PyObject *tstr) {
     }
 
     int hour = 0, minute = 0, second = 0, microsecond = 0;
-    int tzoffset, tzimicrosecond = 0;
+    int tzoffset = 0, tzimicrosecond = 0;
     int rv = parse_isoformat_time(p, len,
                                   &hour, &minute, &second, &microsecond,
                                   &tzoffset, &tzimicrosecond);
@@ -5145,9 +5145,9 @@ static PyObject *
 datetime_utcnow(PyObject *cls, PyObject *dummy)
 {
     if (PyErr_WarnEx(PyExc_DeprecationWarning,
-        "datetime.utcnow() is deprecated and scheduled for removal in a "
+        "datetime.datetime.utcnow() is deprecated and scheduled for removal in a "
         "future version. Use timezone-aware objects to represent datetimes "
-        "in UTC: datetime.now(datetime.UTC).", 1))
+        "in UTC: datetime.datetime.now(datetime.UTC).", 1))
     {
         return NULL;
     }
@@ -5188,9 +5188,9 @@ static PyObject *
 datetime_utcfromtimestamp(PyObject *cls, PyObject *args)
 {
     if (PyErr_WarnEx(PyExc_DeprecationWarning,
-        "datetime.utcfromtimestamp() is deprecated and scheduled for removal "
+        "datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal "
         "in a future version. Use timezone-aware objects to represent "
-        "datetimes in UTC: datetime.fromtimestamp(timestamp, datetime.UTC).", 1))
+        "datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).", 1))
     {
         return NULL;
     }

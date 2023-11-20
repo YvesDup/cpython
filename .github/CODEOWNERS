@@ -9,6 +9,7 @@
 
 # pre-commit
 .pre-commit-config.yaml       @hugovk @AlexWaygood
+.ruff.toml                    @hugovk @AlexWaygood
 
 # Build system
 configure*                    @erlend-aasland @corona10
@@ -141,7 +142,7 @@ Lib/ast.py                    @isidentical
 
 **/*idlelib*                  @terryjreedy
 
-**/*typing*                   @gvanrossum @Fidget-Spinner @JelleZijlstra @AlexWaygood
+**/*typing*                   @gvanrossum @JelleZijlstra @AlexWaygood
 
 **/*ftplib                    @giampaolo
 **/*shutil                    @giampaolo

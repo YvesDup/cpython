@@ -201,6 +201,7 @@ typevar_dealloc(PyObject *self)
     Py_XDECREF(tv->constraints);
     Py_XDECREF(tv->evaluate_constraints);
     _PyObject_ClearManagedDict(self);
+    PyObject_ClearWeakRefs(self);
 
     Py_TYPE(self)->tp_free(self);
     Py_DECREF(tp);
@@ -363,24 +364,26 @@ typevar_new_impl(PyTypeObject *type, PyObject *name, PyObject *constraints,
         }
     }
 
-    if (!PyTuple_CheckExact(constraints)) {
-        PyErr_SetString(PyExc_TypeError,
-                        "constraints must be a tuple");
-        return NULL;
-    }
-    Py_ssize_t n_constraints = PyTuple_GET_SIZE(constraints);
-    if (n_constraints == 1) {
-        PyErr_SetString(PyExc_TypeError,
-                        "A single constraint is not allowed");
-        Py_XDECREF(bound);
-        return NULL;
-    } else if (n_constraints == 0) {
-        constraints = NULL;
-    } else if (bound != NULL) {
-        PyErr_SetString(PyExc_TypeError,
-                        "Constraints cannot be combined with bound=...");
-        Py_XDECREF(bound);
-        return NULL;
+    if (constraints != NULL) {
+        if (!PyTuple_CheckExact(constraints)) {
+            PyErr_SetString(PyExc_TypeError,
+                            "constraints must be a tuple");
+            return NULL;
+        }
+        Py_ssize_t n_constraints = PyTuple_GET_SIZE(constraints);
+        if (n_constraints == 1) {
+            PyErr_SetString(PyExc_TypeError,
+                            "A single constraint is not allowed");
+            Py_XDECREF(bound);
+            return NULL;
+        } else if (n_constraints == 0) {
+            constraints = NULL;
+        } else if (bound != NULL) {
+            PyErr_SetString(PyExc_TypeError,
+                            "Constraints cannot be combined with bound=...");
+            Py_XDECREF(bound);
+            return NULL;
+        }
     }
     PyObject *module = caller();
     if (module == NULL) {
@@ -743,6 +746,7 @@ paramspec_dealloc(PyObject *self)
     Py_DECREF(ps->name);
     Py_XDECREF(ps->bound);
     _PyObject_ClearManagedDict(self);
+    PyObject_ClearWeakRefs(self);
 
     Py_TYPE(self)->tp_free(self);
     Py_DECREF(tp);
@@ -1022,6 +1026,7 @@ typevartuple_dealloc(PyObject *self)
 
     Py_DECREF(tvt->name);
     _PyObject_ClearManagedDict(self);
+    PyObject_ClearWeakRefs(self);
 
     Py_TYPE(self)->tp_free(self);
     Py_DECREF(tp);

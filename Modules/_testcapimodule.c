@@ -44,6 +44,8 @@
 // Several parts of this module are broken out into files in _testcapi/.
 // Include definitions from there.
 #include "_testcapi/parts.h"
+#include "_testcapi/util.h"
+
 
 // Forward declarations
 static struct PyModuleDef _testcapimodule;
@@ -219,10 +221,13 @@ test_dict_inner(int count)
         Py_DECREF(v);
     }
 
+    k = v = UNINITIALIZED_PTR;
     while (PyDict_Next(dict, &pos, &k, &v)) {
         PyObject *o;
         iterations++;
 
+        assert(k != UNINITIALIZED_PTR);
+        assert(v != UNINITIALIZED_PTR);
         i = PyLong_AS_LONG(v) + 1;
         o = PyLong_FromLong(i);
         if (o == NULL)
@@ -232,7 +237,10 @@ test_dict_inner(int count)
             return -1;
         }
         Py_DECREF(o);
+        k = v = UNINITIALIZED_PTR;
     }
+    assert(k == UNINITIALIZED_PTR);
+    assert(v == UNINITIALIZED_PTR);
 
     Py_DECREF(dict);
 
@@ -413,6 +421,41 @@ raise_error(void *unused)
 {
     PyErr_SetNone(PyExc_ValueError);
     return NULL;
+}
+
+static PyObject *
+py_buildvalue(PyObject *self, PyObject *args)
+{
+    const char *fmt;
+    PyObject *objs[10] = {NULL};
+    if (!PyArg_ParseTuple(args, "s|OOOOOOOOOO", &fmt,
+            &objs[0], &objs[1], &objs[2], &objs[3], &objs[4],
+            &objs[5], &objs[6], &objs[7], &objs[8], &objs[9]))
+    {
+        return NULL;
+    }
+    for(int i = 0; i < 10; i++) {
+        NULLABLE(objs[i]);
+    }
+    return Py_BuildValue(fmt,
+            objs[0], objs[1], objs[2], objs[3], objs[4],
+            objs[5], objs[6], objs[7], objs[8], objs[9]);
+}
+
+static PyObject *
+py_buildvalue_ints(PyObject *self, PyObject *args)
+{
+    const char *fmt;
+    unsigned int values[10] = {0};
+    if (!PyArg_ParseTuple(args, "s|IIIIIIIIII", &fmt,
+            &values[0], &values[1], &values[2], &values[3], &values[4],
+            &values[5], &values[6], &values[7], &values[8], &values[9]))
+    {
+        return NULL;
+    }
+    return Py_BuildValue(fmt,
+            values[0], values[1], values[2], values[3], values[4],
+            values[5], values[6], values[7], values[8], values[9]);
 }
 
 static int
@@ -1338,19 +1381,13 @@ static PyObject *
 test_PyBuffer_SizeFromFormat(PyObject *self, PyObject *args)
 {
     const char *format;
-    Py_ssize_t result;
 
     if (!PyArg_ParseTuple(args, "s:test_PyBuffer_SizeFromFormat",
                           &format)) {
         return NULL;
     }
 
-    result = PyBuffer_SizeFromFormat(format);
-    if (result == -1) {
-        return NULL;
-    }
-
-    return PyLong_FromSsize_t(result);
+    RETURN_SIZE(PyBuffer_SizeFromFormat(format));
 }
 
 /* Test that the fatal error from not having a current thread doesn't
@@ -1978,7 +2015,7 @@ return_result_with_error(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
-static PyObject*
+static PyObject *
 getitem_with_error(PyObject *self, PyObject *args)
 {
     PyObject *map, *key;
@@ -2054,90 +2091,6 @@ py_w_stopcode(PyObject *self, PyObject *args)
 }
 #endif
 
-
-static PyObject *
-get_mapping_keys(PyObject* self, PyObject *obj)
-{
-    return PyMapping_Keys(obj);
-}
-
-static PyObject *
-get_mapping_values(PyObject* self, PyObject *obj)
-{
-    return PyMapping_Values(obj);
-}
-
-static PyObject *
-get_mapping_items(PyObject* self, PyObject *obj)
-{
-    return PyMapping_Items(obj);
-}
-
-static PyObject *
-test_mapping_has_key_string(PyObject *self, PyObject *Py_UNUSED(args))
-{
-    PyObject *context = PyDict_New();
-    PyObject *val = PyLong_FromLong(1);
-
-    // Since this uses `const char*` it is easier to test this in C:
-    PyDict_SetItemString(context, "a", val);
-    if (!PyMapping_HasKeyString(context, "a")) {
-        PyErr_SetString(PyExc_RuntimeError,
-                        "Existing mapping key does not exist");
-        return NULL;
-    }
-    if (PyMapping_HasKeyString(context, "b")) {
-        PyErr_SetString(PyExc_RuntimeError,
-                        "Missing mapping key exists");
-        return NULL;
-    }
-
-    Py_DECREF(val);
-    Py_DECREF(context);
-    Py_RETURN_NONE;
-}
-
-static PyObject *
-mapping_has_key(PyObject* self, PyObject *args)
-{
-    PyObject *context, *key;
-    if (!PyArg_ParseTuple(args, "OO", &context, &key)) {
-        return NULL;
-    }
-    return PyLong_FromLong(PyMapping_HasKey(context, key));
-}
-
-static PyObject *
-sequence_set_slice(PyObject* self, PyObject *args)
-{
-    PyObject *sequence, *obj;
-    Py_ssize_t i1, i2;
-    if (!PyArg_ParseTuple(args, "OnnO", &sequence, &i1, &i2, &obj)) {
-        return NULL;
-    }
-
-    int res = PySequence_SetSlice(sequence, i1, i2, obj);
-    if (res == -1) {
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
-
-static PyObject *
-sequence_del_slice(PyObject* self, PyObject *args)
-{
-    PyObject *sequence;
-    Py_ssize_t i1, i2;
-    if (!PyArg_ParseTuple(args, "Onn", &sequence, &i1, &i2)) {
-        return NULL;
-    }
-
-    int res = PySequence_DelSlice(sequence, i1, i2);
-    if (res == -1) {
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
 
 static PyObject *
 test_pythread_tss_key_state(PyObject *self, PyObject *args)
@@ -2239,73 +2192,27 @@ negative_refcount(PyObject *self, PyObject *Py_UNUSED(args))
 
     Py_RETURN_NONE;
 }
+
+static PyObject *
+decref_freed_object(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyObject *obj = PyUnicode_FromString("decref_freed_object");
+    if (obj == NULL) {
+        return NULL;
+    }
+    assert(Py_REFCNT(obj) == 1);
+
+    // Deallocate the memory
+    Py_DECREF(obj);
+    // obj is a now a dangling pointer
+
+    // gh-109496: If Python is built in debug mode, Py_DECREF() must call
+    // _Py_NegativeRefcount() and abort Python.
+    Py_DECREF(obj);
+
+    Py_RETURN_NONE;
+}
 #endif
-
-
-static PyObject *
-sequence_getitem(PyObject *self, PyObject *args)
-{
-    PyObject *seq;
-    Py_ssize_t i;
-    if (!PyArg_ParseTuple(args, "On", &seq, &i)) {
-        return NULL;
-    }
-    return PySequence_GetItem(seq, i);
-}
-
-
-static PyObject *
-sequence_setitem(PyObject *self, PyObject *args)
-{
-    Py_ssize_t i;
-    PyObject *seq, *val;
-    if (!PyArg_ParseTuple(args, "OnO", &seq, &i, &val)) {
-        return NULL;
-    }
-    if (PySequence_SetItem(seq, i, val)) {
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
-
-
-static PyObject *
-sequence_delitem(PyObject *self, PyObject *args)
-{
-    Py_ssize_t i;
-    PyObject *seq;
-    if (!PyArg_ParseTuple(args, "On", &seq, &i)) {
-        return NULL;
-    }
-    if (PySequence_DelItem(seq, i)) {
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
-
-static PyObject *
-hasattr_string(PyObject *self, PyObject* args)
-{
-    PyObject* obj;
-    PyObject* attr_name;
-
-    if (!PyArg_UnpackTuple(args, "hasattr_string", 2, 2, &obj, &attr_name)) {
-        return NULL;
-    }
-
-    if (!PyUnicode_Check(attr_name)) {
-        PyErr_SetString(PyExc_TypeError, "attribute name must a be string");
-        return PyErr_Occurred();
-    }
-
-    const char *name_str = PyUnicode_AsUTF8(attr_name);
-    if (PyObject_HasAttrString(obj, name_str)) {
-        Py_RETURN_TRUE;
-    }
-    else {
-        Py_RETURN_FALSE;
-    }
-}
 
 
 /* Functions for testing C calling conventions (METH_*) are named meth_*,
@@ -3366,6 +3273,8 @@ static PyMethodDef TestMethods[] = {
 #endif
     {"getbuffer_with_null_view", getbuffer_with_null_view,       METH_O},
     {"PyBuffer_SizeFromFormat",  test_PyBuffer_SizeFromFormat,   METH_VARARGS},
+    {"py_buildvalue",            py_buildvalue,                  METH_VARARGS},
+    {"py_buildvalue_ints",       py_buildvalue_ints,             METH_VARARGS},
     {"test_buildvalue_N",        test_buildvalue_N,              METH_NOARGS},
     {"test_buildvalue_issue38913", test_buildvalue_issue38913,   METH_NOARGS},
     {"test_get_statictype_slots", test_get_statictype_slots,     METH_NOARGS},
@@ -3420,23 +3329,13 @@ static PyMethodDef TestMethods[] = {
 #ifdef W_STOPCODE
     {"W_STOPCODE", py_w_stopcode, METH_VARARGS},
 #endif
-    {"get_mapping_keys", get_mapping_keys, METH_O},
-    {"get_mapping_values", get_mapping_values, METH_O},
-    {"get_mapping_items", get_mapping_items, METH_O},
-    {"test_mapping_has_key_string", test_mapping_has_key_string, METH_NOARGS},
-    {"mapping_has_key", mapping_has_key, METH_VARARGS},
-    {"sequence_set_slice", sequence_set_slice, METH_VARARGS},
-    {"sequence_del_slice", sequence_del_slice, METH_VARARGS},
     {"test_pythread_tss_key_state", test_pythread_tss_key_state, METH_VARARGS},
     {"hamt", new_hamt, METH_NOARGS},
     {"bad_get", _PyCFunction_CAST(bad_get), METH_FASTCALL},
 #ifdef Py_REF_DEBUG
     {"negative_refcount", negative_refcount, METH_NOARGS},
+    {"decref_freed_object", decref_freed_object, METH_NOARGS},
 #endif
-    {"sequence_getitem", sequence_getitem, METH_VARARGS},
-    {"sequence_setitem", sequence_setitem, METH_VARARGS},
-    {"sequence_delitem", sequence_delitem, METH_VARARGS},
-    {"hasattr_string", hasattr_string, METH_VARARGS},
     {"meth_varargs", meth_varargs, METH_VARARGS},
     {"meth_varargs_keywords", _PyCFunction_CAST(meth_varargs_keywords), METH_VARARGS|METH_KEYWORDS},
     {"meth_o", meth_o, METH_O},
@@ -4048,7 +3947,9 @@ PyInit__testcapi(void)
     PyModule_AddObject(m, "ULLONG_MAX", PyLong_FromUnsignedLongLong(ULLONG_MAX));
     PyModule_AddObject(m, "PY_SSIZE_T_MAX", PyLong_FromSsize_t(PY_SSIZE_T_MAX));
     PyModule_AddObject(m, "PY_SSIZE_T_MIN", PyLong_FromSsize_t(PY_SSIZE_T_MIN));
+    PyModule_AddObject(m, "SIZE_MAX", PyLong_FromSize_t(SIZE_MAX));
     PyModule_AddObject(m, "SIZEOF_WCHAR_T", PyLong_FromSsize_t(sizeof(wchar_t)));
+    PyModule_AddObject(m, "SIZEOF_VOID_P", PyLong_FromSsize_t(sizeof(void*)));
     PyModule_AddObject(m, "SIZEOF_TIME_T", PyLong_FromSsize_t(sizeof(time_t)));
     PyModule_AddObject(m, "Py_Version", PyLong_FromUnsignedLong(Py_Version));
     Py_INCREF(&PyInstanceMethod_Type);
@@ -4073,6 +3974,15 @@ PyInit__testcapi(void)
         return NULL;
     }
     if (_PyTestCapi_Init_Heaptype(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Abstract(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_ByteArray(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Bytes(m) < 0) {
         return NULL;
     }
     if (_PyTestCapi_Init_Unicode(m) < 0) {
@@ -4102,6 +4012,24 @@ PyInit__testcapi(void)
     if (_PyTestCapi_Init_Float(m) < 0) {
         return NULL;
     }
+    if (_PyTestCapi_Init_Complex(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Numbers(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Dict(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Set(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_List(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Tuple(m) < 0) {
+        return NULL;
+    }
     if (_PyTestCapi_Init_Structmember(m) < 0) {
         return NULL;
     }
@@ -4115,6 +4043,15 @@ PyInit__testcapi(void)
         return NULL;
     }
     if (_PyTestCapi_Init_PyOS(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_File(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Codec(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Sys(m) < 0) {
         return NULL;
     }
     if (_PyTestCapi_Init_Immortal(m) < 0) {
