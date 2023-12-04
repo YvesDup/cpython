@@ -12,11 +12,17 @@ class QueueEmpty(Exception):
     """Raised when Queue.get_nowait() is called on an empty Queue."""
     pass
 
+class PendingGetTasks(QueueEmpty):
+    """Raised when the Queue.get_nowait() method is called on not empty Queue._getters"""
+    pass
 
 class QueueFull(Exception):
     """Raised when the Queue.put_nowait() method is called on a full Queue."""
     pass
 
+class PendingPutTasks(QueueFull):
+    """Raised when the Queue.put_nowait() method is called on not empty Queue._putters"""
+    pass
 
 class Queue(mixins._LoopBoundMixin):
     """A queue, useful for coordinating producer and consumer coroutines.
@@ -29,21 +35,25 @@ class Queue(mixins._LoopBoundMixin):
     with qsize(), since your single-threaded asyncio application won't be
     interrupted between calling qsize() and doing an operation on the Queue.
     """
-
     def __init__(self, maxsize=0):
         self._maxsize = maxsize
 
-        # Futures.
-        self._getters = collections.deque()
-        # Futures.
-        self._putters = collections.deque()
+        self._sem_putters = locks.Semaphore(maxsize)
+        self._sem_getters = locks.Semaphore(0)
         self._unfinished_tasks = 0
         self._finished = locks.Event()
         self._finished.set()
         self._init(maxsize)
 
-    # These three are overridable in subclasses.
+    @property
+    def _putters(self):
+        return self._sem_putters._waiters or []
 
+    @property
+    def _getters(self):
+        return self._sem_getters._waiters or []
+
+    # These three are overridable in subclasses.
     def _init(self, maxsize):
         self._queue = collections.deque()
 
@@ -57,11 +67,11 @@ class Queue(mixins._LoopBoundMixin):
 
     def _wakeup_next(self, waiters):
         # Wake up the next waiter (if any) that isn't cancelled.
-        while waiters:
-            waiter = waiters.popleft()
-            if not waiter.done():
-                waiter.set_result(None)
-                break
+        if waiters is self._sem_putters:
+            if self._maxsize > 0:
+                self._sem_putters.release()
+        else:
+            self._sem_getters.release()
 
     def __repr__(self):
         return f'<{type(self).__name__} at {id(self):#x} {self._format()}>'
@@ -112,75 +122,59 @@ class Queue(mixins._LoopBoundMixin):
 
         Put an item into the queue. If the queue is full, wait until a free
         slot is available before adding item.
+        If queue is not full and there are still items waiting for free slots,
+        new item has to wait for its time.
         """
-        while self.full():
-            putter = self._get_loop().create_future()
-            self._putters.append(putter)
-            try:
-                await putter
-            except:
-                putter.cancel()  # Just in case putter is not done yet.
-                try:
-                    # Clean self._putters from canceled putters.
-                    self._putters.remove(putter)
-                except ValueError:
-                    # The putter could be removed from self._putters by a
-                    # previous get_nowait call.
-                    pass
-                if not self.full() and not putter.cancelled():
-                    # We were woken up by get_nowait(), but can't take
-                    # the call.  Wake up the next in line.
-                    self._wakeup_next(self._putters)
-                raise
-        return self.put_nowait(item)
+        if self._maxsize > 0:
+            await self._sem_putters.acquire()
+        return self._put_and_wakeup_next(item)
 
     def put_nowait(self, item):
         """Put an item into the queue without blocking.
 
         If no free slot is immediately available, raise QueueFull.
+        If tasks still pending for a free slot, raise PendingOrMovingItemsError
         """
         if self.full():
             raise QueueFull
+        if self._sem_putters._waiters:
+            raise QueueFull # PendingPutTasks
+        self._put_and_wakeup_next(item)
+
+    def _put_and_wakeup_next(self, item):
+        """Put an item into the queue.
+
+        Wakes up next tasks waiting for slots.
+        """
         self._put(item)
         self._unfinished_tasks += 1
         self._finished.clear()
-        self._wakeup_next(self._getters)
+        self._wakeup_next(self._sem_getters)
 
     async def get(self):
         """Remove and return an item from the queue.
 
         If queue is empty, wait until an item is available.
         """
-        while self.empty():
-            getter = self._get_loop().create_future()
-            self._getters.append(getter)
-            try:
-                await getter
-            except:
-                getter.cancel()  # Just in case getter is not done yet.
-                try:
-                    # Clean self._getters from canceled getters.
-                    self._getters.remove(getter)
-                except ValueError:
-                    # The getter could be removed from self._getters by a
-                    # previous put_nowait call.
-                    pass
-                if not self.empty() and not getter.cancelled():
-                    # We were woken up by put_nowait(), but can't take
-                    # the call.  Wake up the next in line.
-                    self._wakeup_next(self._getters)
-                raise
-        return self.get_nowait()
+        await self._sem_getters.acquire()
+        return self._get_and_wakeup_next()
 
     def get_nowait(self):
         """Remove and return an item from the queue.
 
-        Return an item if one is immediately available, else raise QueueEmpty.
+        Return an item if one is immediately available, else raise QueueEmpty
         """
         if self.empty():
             raise QueueEmpty
+        if self._sem_getters._waiters:
+            raise QueueEmpty # PendingGetTasks
+        return self._get_and_wakeup_next()
+
+    def _get_and_wakeup_next(self):
+        """Remove and return an item from the queue.
+        """
         item = self._get()
-        self._wakeup_next(self._putters)
+        self._wakeup_next(self._sem_putters)
         return item
 
     def task_done(self):
