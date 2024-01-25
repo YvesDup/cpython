@@ -485,19 +485,6 @@ Pure paths provide the following methods and properties:
       'c:/windows'
 
 
-.. method:: PurePath.as_uri()
-
-   Represent the path as a ``file`` URI.  :exc:`ValueError` is raised if
-   the path isn't absolute.
-
-      >>> p = PurePosixPath('/etc/passwd')
-      >>> p.as_uri()
-      'file:///etc/passwd'
-      >>> p = PureWindowsPath('c:/Windows')
-      >>> p.as_uri()
-      'file:///c:/Windows'
-
-
 .. method:: PurePath.is_absolute()
 
    Return whether the path is absolute or not.  A path is considered absolute
@@ -526,6 +513,13 @@ Pure paths provide the following methods and properties:
       >>> p.is_relative_to('/etc')
       True
       >>> p.is_relative_to('/usr')
+      False
+
+   This method is string-based; it neither accesses the filesystem nor treats
+   "``..``" segments specially. The following code is equivalent:
+
+      >>> u = PurePath('/usr')
+      >>> u == p or u in p.parents
       False
 
    .. versionadded:: 3.9
@@ -813,6 +807,67 @@ bugs or failures in your application)::
    UnsupportedOperation: cannot instantiate 'WindowsPath' on your system
 
 
+File URIs
+^^^^^^^^^
+
+Concrete path objects can be created from, and represented as, 'file' URIs
+conforming to :rfc:`8089`.
+
+.. note::
+
+   File URIs are not portable across machines with different
+   :ref:`filesystem encodings <filesystem-encoding>`.
+
+.. classmethod:: Path.from_uri(uri)
+
+   Return a new path object from parsing a 'file' URI. For example::
+
+      >>> p = Path.from_uri('file:///etc/hosts')
+      PosixPath('/etc/hosts')
+
+   On Windows, DOS device and UNC paths may be parsed from URIs::
+
+      >>> p = Path.from_uri('file:///c:/windows')
+      WindowsPath('c:/windows')
+      >>> p = Path.from_uri('file://server/share')
+      WindowsPath('//server/share')
+
+   Several variant forms are supported::
+
+      >>> p = Path.from_uri('file:////server/share')
+      WindowsPath('//server/share')
+      >>> p = Path.from_uri('file://///server/share')
+      WindowsPath('//server/share')
+      >>> p = Path.from_uri('file:c:/windows')
+      WindowsPath('c:/windows')
+      >>> p = Path.from_uri('file:/c|/windows')
+      WindowsPath('c:/windows')
+
+   :exc:`ValueError` is raised if the URI does not start with ``file:``, or
+   the parsed path isn't absolute.
+
+   .. versionadded:: 3.13
+
+
+.. method:: Path.as_uri()
+
+   Represent the path as a 'file' URI.  :exc:`ValueError` is raised if
+   the path isn't absolute.
+
+   .. code-block:: pycon
+
+      >>> p = PosixPath('/etc/passwd')
+      >>> p.as_uri()
+      'file:///etc/passwd'
+      >>> p = WindowsPath('c:/Windows')
+      >>> p.as_uri()
+      'file:///c:/Windows'
+
+   For historical reasons, this method is also available from
+   :class:`PurePath` objects. However, its use of :func:`os.fsencode` makes
+   it strictly impure.
+
+
 Methods
 ^^^^^^^
 
@@ -851,42 +906,6 @@ call fails (for example because the path doesn't exist).
       PosixPath('/home/antoine')
 
    .. versionadded:: 3.5
-
-
-.. classmethod:: Path.from_uri(uri)
-
-   Return a new path object from parsing a 'file' URI conforming to
-   :rfc:`8089`. For example::
-
-       >>> p = Path.from_uri('file:///etc/hosts')
-       PosixPath('/etc/hosts')
-
-   On Windows, DOS device and UNC paths may be parsed from URIs::
-
-       >>> p = Path.from_uri('file:///c:/windows')
-       WindowsPath('c:/windows')
-       >>> p = Path.from_uri('file://server/share')
-       WindowsPath('//server/share')
-
-   Several variant forms are supported::
-
-       >>> p = Path.from_uri('file:////server/share')
-       WindowsPath('//server/share')
-       >>> p = Path.from_uri('file://///server/share')
-       WindowsPath('//server/share')
-       >>> p = Path.from_uri('file:c:/windows')
-       WindowsPath('c:/windows')
-       >>> p = Path.from_uri('file:/c|/windows')
-       WindowsPath('c:/windows')
-
-   :exc:`ValueError` is raised if the URI does not start with ``file:``, or
-   the parsed path isn't absolute.
-
-   :func:`os.fsdecode` is used to decode percent-escaped byte sequences, and
-   so file URIs are not portable across machines with different
-   :ref:`filesystem encodings <filesystem-encoding>`.
-
-   .. versionadded:: 3.13
 
 
 .. method:: Path.stat(*, follow_symlinks=True)
@@ -993,6 +1012,10 @@ call fails (for example because the path doesn't exist).
       Set *follow_symlinks* to ``True`` or ``False`` to improve performance
       of recursive globbing.
 
+   This method calls :meth:`Path.is_dir` on the top-level directory and
+   propagates any :exc:`OSError` exception that is raised. Subsequent
+   :exc:`OSError` exceptions from scanning directories are suppressed.
+
    By default, or when the *case_sensitive* keyword-only argument is set to
    ``None``, this method matches paths using platform-specific casing rules:
    typically, case-sensitive on POSIX, and case-insensitive on Windows.
@@ -1019,6 +1042,9 @@ call fails (for example because the path doesn't exist).
       Emits :exc:`FutureWarning` if the pattern ends with "``**``". In a
       future Python release, patterns with this ending will match both files
       and directories. Add a trailing slash to match only directories.
+
+   .. versionchanged:: 3.13
+      The *pattern* parameter accepts a :term:`path-like object`.
 
 .. method:: Path.group(*, follow_symlinks=True)
 
@@ -1280,9 +1306,9 @@ call fails (for example because the path doesn't exist).
    If *exist_ok* is false (the default), :exc:`FileExistsError` is
    raised if the target directory already exists.
 
-   If *exist_ok* is true, :exc:`FileExistsError` exceptions will be
-   ignored (same behavior as the POSIX ``mkdir -p`` command), but only if the
-   last path component is not an existing non-directory file.
+   If *exist_ok* is true, :exc:`FileExistsError` will not be raised unless the given
+   path already exists in the file system and is not a directory (same
+   behavior as the POSIX ``mkdir -p`` command).
 
    .. versionchanged:: 3.5
       The *exist_ok* parameter was added.
@@ -1482,6 +1508,9 @@ call fails (for example because the path doesn't exist).
    .. versionchanged:: 3.13
       The *follow_symlinks* parameter was added.
 
+   .. versionchanged:: 3.13
+      The *pattern* parameter accepts a :term:`path-like object`.
+
 .. method:: Path.rmdir()
 
    Remove this directory.  The directory must be empty.
@@ -1510,9 +1539,13 @@ call fails (for example because the path doesn't exist).
 
 .. method:: Path.symlink_to(target, target_is_directory=False)
 
-   Make this path a symbolic link to *target*.  Under Windows,
-   *target_is_directory* must be true (default ``False``) if the link's target
-   is a directory.  Under POSIX, *target_is_directory*'s value is ignored.
+   Make this path a symbolic link pointing to *target*.
+
+   On Windows, a symlink represents either a file or a directory, and does not
+   morph to the target dynamically.  If the target is present, the type of the
+   symlink will be created to match. Otherwise, the symlink will be created
+   as a directory if *target_is_directory* is ``True`` or a file symlink (the
+   default) otherwise.  On non-Windows platforms, *target_is_directory* is ignored.
 
    ::
 
