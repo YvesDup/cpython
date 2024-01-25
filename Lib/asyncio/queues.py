@@ -1,4 +1,5 @@
-__all__ = ('Queue', 'PriorityQueue', 'LifoQueue', 'QueueFull', 'QueueEmpty')
+__all__ = ('Queue', 'PriorityQueue', 'LifoQueue', 'QueueFull', 'QueueEmpty',
+           'QueueFullWithPendingPutTasks', 'QueueEmptyWithPendingGetTasks')
 
 import collections
 import heapq
@@ -12,11 +13,17 @@ class QueueEmpty(Exception):
     """Raised when Queue.get_nowait() is called on an empty Queue."""
     pass
 
+class QueueEmptyWithPendingGetTasks(QueueEmpty):
+    """Raised when the Queue.get_nowait() method is called on not empty Queue._getters"""
+    pass
 
 class QueueFull(Exception):
     """Raised when the Queue.put_nowait() method is called on a full Queue."""
     pass
 
+class QueueFullWithPendingPutTasks(QueueFull):
+    """Raised when the Queue.put_nowait() method is called on not empty Queue._putters"""
+    pass
 
 class Queue(mixins._LoopBoundMixin):
     """A queue, useful for coordinating producer and consumer coroutines.
@@ -37,6 +44,9 @@ class Queue(mixins._LoopBoundMixin):
         self._getters = collections.deque()
         # Futures.
         self._putters = collections.deque()
+        # Transit tasks counters.
+        self._getter_transit_tasks = 0
+        self._putter_transit_tasks = 0
         self._unfinished_tasks = 0
         self._finished = locks.Event()
         self._finished.set()
@@ -57,11 +67,13 @@ class Queue(mixins._LoopBoundMixin):
 
     def _wakeup_next(self, waiters):
         # Wake up the next waiter (if any) that isn't cancelled.
+        # from gh-83055: return True when a waiter was popped from deque.
         while waiters:
             waiter = waiters.popleft()
             if not waiter.done():
                 waiter.set_result(None)
-                break
+                return True
+        return False
 
     def __repr__(self):
         return f'<{type(self).__name__} at {id(self):#x} {self._format()}>'
@@ -111,51 +123,78 @@ class Queue(mixins._LoopBoundMixin):
         """Put an item into the queue.
 
         Put an item into the queue. If the queue is full, wait until a free
-        slot is available before adding item.
+        slot is available before adding item. If there are still item moving
+        to a free slot or waiting for a free slot, wait for its time.
         """
-        while self.full():
+        # Enter in the loop when the queue is full
+        # or pending tasks are in self._putters.
+        exist_pending_putters = self._putters or self._putter_transit_tasks > 0
+        while self.full() or exist_pending_putters:
+            # Exit from loop only when queue is not full.
+            exist_pending_putters = False
             putter = self._get_loop().create_future()
             self._putters.append(putter)
             try:
                 await putter
+                self._putter_transit_tasks -= 1
             except:
                 putter.cancel()  # Just in case putter is not done yet.
                 try:
-                    # Clean self._putters from canceled putters.
+                    # Clean self._putters from cancelled putters.
                     self._putters.remove(putter)
                 except ValueError:
                     # The putter could be removed from self._putters by a
-                    # previous get_nowait call.
-                    pass
+                    # previous _get_and_wakeup_next() call.
+                    self._putter_transit_tasks -= 1
                 if not self.full() and not putter.cancelled():
-                    # We were woken up by get_nowait(), but can't take
-                    # the call.  Wake up the next in line.
-                    self._wakeup_next(self._putters)
+                    # We were woken up by _get_and_wakeup_next(), but can't
+                    # take the call.  Wake up the next in line.
+                    if self._wakeup_next(self._putters):
+                        self._putter_transit_tasks += 1
                 raise
-        return self.put_nowait(item)
+        return self._put_and_wakeup_next(item)
 
     def put_nowait(self, item):
         """Put an item into the queue without blocking.
 
         If no free slot is immediately available, raise QueueFull.
+        If there are pending put tasks, raise QueueFullWithPendingPutTasks.
         """
         if self.full():
             raise QueueFull
+        if self._putters or self._putter_transit_tasks > 0:
+            raise QueueFullWithPendingPutTasks
+        self._put_and_wakeup_next(item)
+
+    def _put_and_wakeup_next(self, item):
+        """Put an item into the queue.
+
+        Wakes up next tasks waiting for slots.
+        """
         self._put(item)
         self._unfinished_tasks += 1
         self._finished.clear()
-        self._wakeup_next(self._getters)
+        if self._wakeup_next(self._getters):
+            self._getter_transit_tasks += 1
 
     async def get(self):
         """Remove and return an item from the queue.
 
         If queue is empty, wait until an item is available.
+        If queue is not empty or there are still tasks waiting for
+        getting items, this task has to wait for its time.
         """
-        while self.empty():
+        # Enter in the loop when the queue is empty
+        # or pending tasks are in self._getters.
+        exist_pending_getters = self._getters or self._getter_transit_tasks > 0
+        while self.empty() or exist_pending_getters:
+            # Exit from loop only when queue is not empty.
+            exist_pending_getters = False
             getter = self._get_loop().create_future()
             self._getters.append(getter)
             try:
                 await getter
+                self._getter_transit_tasks -= 1
             except:
                 getter.cancel()  # Just in case getter is not done yet.
                 try:
@@ -163,24 +202,37 @@ class Queue(mixins._LoopBoundMixin):
                     self._getters.remove(getter)
                 except ValueError:
                     # The getter could be removed from self._getters by a
-                    # previous put_nowait call.
-                    pass
+                    # previous _put_and_wakeup_next call.
+                    self._getter_transit_tasks -= 1
                 if not self.empty() and not getter.cancelled():
-                    # We were woken up by put_nowait(), but can't take
+                    # We were woken up by _put_and_wakeup_next(), but can't take
                     # the call.  Wake up the next in line.
-                    self._wakeup_next(self._getters)
+                    if self._wakeup_next(self._getters):
+                        self._getter_transit_tasks += 1
                 raise
-        return self.get_nowait()
+        return self._get_and_wakeup_next()
 
     def get_nowait(self):
         """Remove and return an item from the queue.
 
         Return an item if one is immediately available, else raise QueueEmpty.
+        Return an item if there is no pending get task, else
+        raise QueueEmptyWithPendingGetTasks.
         """
         if self.empty():
             raise QueueEmpty
+        if self._getters or self._getter_transit_tasks > 0:
+            raise QueueEmptyWithPendingGetTasks
+        return self._get_and_wakeup_next()
+
+    def _get_and_wakeup_next(self):
+        """Remove and return an item from the queue.
+
+        Wakes up next tasks waiting for slots.
+        """
         item = self._get()
-        self._wakeup_next(self._putters)
+        if self._wakeup_next(self._putters):
+            self._putter_transit_tasks += 1
         return item
 
     def task_done(self):
