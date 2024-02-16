@@ -316,7 +316,7 @@ class BaseQueueTestMixin(BlockingTestMixin):
     def test_shutdown_immediate_all_methods_in_one_thread(self):
         return self._shutdown_all_methods_in_one_thread(True)
 
-    def _write_msg_thread(self, q, n, results, delay,
+    def _write_msg_thread(self, q, n, results,
                             i_when_exec_shutdown,
                             event_start, event_end):
         event_start.wait()
@@ -326,18 +326,19 @@ class BaseQueueTestMixin(BlockingTestMixin):
                 results.append(True)
             except self.queue.ShutDown:
                 results.append(False)
+            except:
+                results.append(None)
+
             # triggers shutdown of queue
             if i == i_when_exec_shutdown:
                 event_end.set()
-            #time.sleep(delay)
         # end of all puts
         q.join()
 
-    def _read_msg_thread(self, q, nb, results, delay, event_start):
+    def _read_msg_thread(self, q, nb, results, event_start):
         event_start.wait()
         block = True
         while nb:
-            #time.sleep(delay)
             try:
                 # Get at least one message
                 q.get(block)
@@ -349,18 +350,28 @@ class BaseQueueTestMixin(BlockingTestMixin):
                 results.append(False)
                 nb -= 1
             except self.queue.Empty:
+                results.append(None)
                 pass
         q.join()
 
     def _shutdown_thread(self, q, event_end, immediate):
         event_end.wait()
         q.shutdown(immediate)
-        q.join()
+        try:
+            q.join()
+            print("==")
+        except:
+            print("**")
 
-    def _join_thread(self, q, delay, event_start):
+    def _join_thread(self, q, results, event_start):
         event_start.wait()
-        time.sleep(delay)
-        q.join()
+        try:
+            q.join()
+            results.append(True)
+            print("-")
+        except:
+            results.append(False)
+            print("+")
 
     def _shutdown_all_methods_in_many_threads(self, immediate):
         q = self.type2test()
@@ -369,19 +380,20 @@ class BaseQueueTestMixin(BlockingTestMixin):
         ev_exec_shutdown = threading.Event()
         res_puts = []
         res_gets = []
-        delay = 1e-4
-        read_process = 4
-        nb_msgs = read_process * 16
-        nb_msgs_r = nb_msgs // read_process
+        res_joins = []
+        read_threads = 4
+        join_threads = 2
+        nb_msgs = read_threads * 16
+        nb_msgs_r = nb_msgs // read_threads
         when_exec_shutdown = nb_msgs // 2
         lprocs = (
-            (self._write_msg_thread, 1,  (q, nb_msgs, res_puts, delay,
+            (self._write_msg_thread, 1,  (q, nb_msgs, res_puts,
                                             when_exec_shutdown,
                                             ev_start, ev_exec_shutdown)),
-            (self._read_msg_thread, read_process, (q, nb_msgs_r,
-                                                    res_gets, delay*2,
+            (self._read_msg_thread, read_threads, (q, nb_msgs_r,
+                                                    res_gets,
                                                     ev_start)),
-            (self._join_thread, 2, (q, delay*2, ev_start)),
+            (self._join_thread, join_threads, (q, res_joins, ev_start)),
             (self._shutdown_thread, 1, (q, ev_exec_shutdown, immediate)),
             )
         # start all threds
@@ -393,11 +405,12 @@ class BaseQueueTestMixin(BlockingTestMixin):
         ev_start.set()
 
         if not immediate:
-            assert(len(res_gets) == len(res_puts))
-            assert(res_gets.count(True) == res_puts.count(True))
+            self.assertListEqual(res_gets, res_puts)
+            # self.assertListEqual(res_joins, [True]*join_threads)
         else:
-            assert(len(res_gets) <= len(res_puts))
-            assert(res_gets.count(True) <= res_puts.count(True))
+            self.assertLessEqual(len(res_gets), len(res_puts))
+            self.assertLessEqual(res_gets.count(True), res_puts.count(True))
+            # self.assertListEqual(res_joins, [True]*join_threads)
 
         for thread in ps[1:]:
             thread.join()
