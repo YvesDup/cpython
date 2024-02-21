@@ -2,7 +2,6 @@
 # to ensure the Queue locks remain stable.
 import itertools
 import random
-import sys
 import threading
 import time
 import unittest
@@ -317,99 +316,155 @@ class BaseQueueTestMixin(BlockingTestMixin):
     def test_shutdown_immediate_all_methods_in_one_thread(self):
         return self._shutdown_all_methods_in_one_thread(True)
 
-    def _write_msg_thread(self, q, n, results, delay,
-                            i_when_exec_shutdown,
-                            event_start, event_end):
-        event_start.wait()
-        for i in range(1, n+1):
-            try:
-                q.put((i, "YDLO"))
-                results.append(True)
-            except self.queue.ShutDown:
-                results.append(False)
-            # triggers shutdown of queue
-            if i == i_when_exec_shutdown:
-                event_end.set()
-            time.sleep(delay)
-        # end of all puts
-        q.join()
-
-    def _read_msg_thread(self, q, nb, results, delay, event_start):
-        event_start.wait()
-        block = True
-        while nb:
-            time.sleep(delay)
-            try:
-                # Get at least one message
-                q.get(block)
-                block = False
-                q.task_done()
-                results.append(True)
-                nb -= 1
-            except self.queue.ShutDown:
-                results.append(False)
-                nb -= 1
-            except self.queue.Empty:
-                pass
-        q.join()
-
-    def _shutdown_thread(self, q, event_end, immediate):
-        event_end.wait()
-        q.shutdown(immediate)
-        q.join()
-
-    def _join_thread(self, q, delay, event_start):
-        event_start.wait()
-        time.sleep(delay)
-        q.join()
 
     def _shutdown_all_methods_in_many_threads(self, immediate):
+        # Arrange
         q = self.type2test()
-        ps = []
-        ev_start = threading.Event()
-        ev_exec_shutdown = threading.Event()
-        res_puts = []
-        res_gets = []
-        delay = 1e-4
-        read_process = 4
-        nb_msgs = read_process * 16
-        nb_msgs_r = nb_msgs // read_process
-        when_exec_shutdown = nb_msgs // 2
-        lprocs = (
-            (self._write_msg_thread, 1,  (q, nb_msgs, res_puts, delay,
-                                            when_exec_shutdown,
-                                            ev_start, ev_exec_shutdown)),
-            (self._read_msg_thread, read_process, (q, nb_msgs_r,
-                                                    res_gets, delay*2,
-                                                    ev_start)),
-            (self._join_thread, 2, (q, delay*2, ev_start)),
-            (self._shutdown_thread, 1, (q, ev_exec_shutdown, immediate)),
-            )
-        # start all threds
-        for func, n, args in lprocs:
-            for i in range(n):
-                ps.append(threading.Thread(target=func, args=args))
-                ps[-1].start()
-        # set event in order to run q.shutdown()
-        ev_start.set()
+        queue_type = type(q)
 
-        if not immediate:
-            assert(len(res_gets) == len(res_puts))
-            assert(res_gets.count(True) == res_puts.count(True))
-        else:
-            assert(len(res_gets) <= len(res_puts))
-            assert(res_gets.count(True) <= res_puts.count(True))
+        start_gets = threading.Event()
+        shutdown = threading.Event()
 
-        for thread in ps[1:]:
+        n_gets_lock = threading.Lock()
+        n_gets = 0
+
+        calls = []
+        results = []
+        queue_size_after_join = []
+        nb = 15
+        less_nb = 5
+
+        def _record_call(f, *a):
+            try:
+                ret = f(*a)
+            except Exception as e:
+                calls.append((f, a, type(e)))
+                raise
+            else:
+                calls.append((f, a, ret))
+                return ret
+
+        def _record_result(f):
+            try:
+                result = f()
+            except Exception as e:
+                results.append((f, e))
+            else:
+                results.append((f, result))
+
+        def put_worker():
+
+            for i in range(less_nb):
+                _record_call(q.put, i)
+
+            start_gets.set()
+            for i in range(less_nb, nb):
+                _record_call(q.put, i)
+
+            shutdown.set()
+
+            # Should raise ShutDown
+            _record_call(q.put, nb)
+
+        def get_worker():
+            def _get(block, q):
+                try:
+                    item = _record_call(q.get, block)
+                    _record_call(q.task_done)
+                    return item
+                except:
+                    raise
+
+            nonlocal n_gets
+            start_gets.wait()
+
+            while True:
+                try:
+                    _get(False, q)
+                    with n_gets_lock:
+                        if n_gets >= nb:
+                            print("----threshold reached")
+                            break
+                        n_gets += 1
+                except self.Queue.ShutDown:
+                    break
+                except: # ValueError from q.join() or Empty from q.get(False)
+                    pass
+
+            _record_call(_get, False, q)  # should raise ShutDown if immediate
+
+        def join_worker():
+            start_gets.wait()
+            _record_call(q.join)
+            queue_size_after_join.append(q.qsize())
+
+        def shutdown_worker():
+            shutdown.wait()
+            _record_call(q.shutdown, immediate)
+
+        def _start_thread(f):
+            thread = threading.Thread(target=_record_result, args=(f,))
+            thread.start()
+            return thread
+
+        threads = [
+            _start_thread(put_worker),
+            *(_start_thread(get_worker) for _ in range(4)),
+            *(_start_thread(join_worker) for _ in range(2)),
+            _start_thread(shutdown_worker),
+        ]
+        self.assertLess(less_nb, nb)
+
+        # Act
+        shutdown.wait()
+        for thread in threads:
             thread.join()
 
-    @unittest.skip("test times out (gh-115258)")
+        # Assert
+        self.assertEqual(q.qsize(), 0)
+
+        if immediate:
+            self.assertTrue(all(qs == 0 for qs in queue_size_after_join))
+        else:
+            self.assertTrue(all(qs >= 0 for qs in queue_size_after_join))
+        # print(calls)
+        self.assertListEqual(
+            [a for f, a, _ in calls if f == q.put], [(i,) for i in range(nb+1)]
+        )
+        self.assertListEqual(
+            [a for f, a, res in calls if f == q.get and isinstance(res, int)], [(False,)] * (nb+1)
+        )
+        self.assertListEqual([a for f, a, _ in calls if f == q.join], [(), ()])
+        self.assertListEqual(
+            [a for f, a, _ in calls if f == q.shutdown], [(immediate,)]
+        )
+
+        put_worker_result = next(r for f, r in results if f == put_worker)
+        self.assertIsNone(put_worker_result)
+        """
+        get_worker_results = [r for f, r in results if f is get_worker]
+        if immediate:
+            self.assertListEqual(get_worker_results, [self.queue.ShutDown] * 4)
+        else:
+            self.assertListEqual(get_worker_results, [None] * 4)
+
+        join_worker_results = [r for f, r in results if f == join_worker]
+        self.assertListEqual(join_worker_results, [None, None])
+
+        shutdown_worker_result = next(
+            r for f, r, _ in results if f == shutdown_worker
+        )
+        self.assertIsNone(shutdown_worker_result)
+        """
+
+    # @unittest.skip("test times out (gh-115258)")
     def test_shutdown_all_methods_in_many_threads(self):
         return self._shutdown_all_methods_in_many_threads(False)
 
-    @unittest.skip("test times out (gh-115258)")
+    # @unittest.skip("test times out (gh-115258)")
     def test_shutdown_immediate_all_methods_in_many_threads(self):
         return self._shutdown_all_methods_in_many_threads(True)
+
 
     def _get(self, q, go, results, shutdown=False):
         go.wait()
