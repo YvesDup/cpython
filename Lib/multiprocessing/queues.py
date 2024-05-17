@@ -50,7 +50,6 @@ class Queue(object):
         self._reset()
         self._is_shutdown = ctx.Value('B', False)
         self._n_items = ctx.Value('Q', 0)
-        self._lock = ctx.Lock()
         self._rcond = ctx.Condition()
         self._wcond = ctx.Condition()
 
@@ -61,12 +60,12 @@ class Queue(object):
         context.assert_spawning(self)
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
-                self._is_shutdown, self._n_items, self._rcond, self._wcond, self._lock)
+                self._is_shutdown, self._n_items, self._rcond, self._wcond)
 
     def __setstate__(self, state):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
-         self._is_shutdown, self._n_items, self._rcond, self._wcond, self._lock) = state
+         self._is_shutdown, self._n_items, self._rcond, self._wcond) = state
         self._reset()
 
     def _after_fork(self):
@@ -102,7 +101,6 @@ class Queue(object):
                     self._wcond.wait()
                     if self._is_shutdown.value:
                         raise ShutDown
-                print("p")
             else:
                 endtime = time() + timeout
                 while self.qsize() >= self._maxsize:
@@ -131,20 +129,22 @@ class Queue(object):
             raise ValueError(f"Queue {self!r} is closed")
         if self._is_shutdown.value and self.empty():
             raise ShutDown
-        with self._rcond:
-            if block and timeout is None:
+        if block and timeout is None:
+            with self._rcond:
                 while self.empty():
                     self._rcond.wait()
                     if self._is_shutdown.value and self.empty():
                         raise ShutDown
                 res = self._recv_bytes()
-            else:
-                if block:
-                    deadline = time.monotonic() + timeout
-                if not self._rcond.wait(timeout):
-                    if self._is_shutdown.value and self.empty():
-                        raise ShutDown
-                    raise Empty
+        else:
+            if block:
+                deadline = time.monotonic() + timeout
+            if not self._rcond.acquire(timeout):
+                if self._is_shutdown.value and self.empty():
+                    raise ShutDown
+                raise Empty
+            # here rcond is acquired
+            try:
                 if block:
                     timeout = deadline - time.monotonic()
                     if not self._poll(timeout):
@@ -157,6 +157,9 @@ class Queue(object):
                     raise Empty
 
                 res = self._recv_bytes()
+
+            finally:
+                self._rcond.release()
 
         # update n_items
         with self._n_items.get_lock():
@@ -253,7 +256,8 @@ class Queue(object):
             args=(self._buffer, self._notempty, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
-                  self._sem),
+                  self._wcond, self._n_items),
+#                  self._sem),
             name='QueueFeederThread',
             daemon=True,
         )
@@ -301,7 +305,8 @@ class Queue(object):
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
-              writer_close, ignore_epipe, onerror, queue_sem):
+              writer_close, ignore_epipe, onerror, queue_wcond, n_items):
+#              writer_close, ignore_epipe, onerror, queue_sem):
         debug('starting thread to feed data to pipe')
         nacquire = notempty.acquire
         nrelease = notempty.release
@@ -359,7 +364,11 @@ class Queue(object):
                     # if the object had been silently removed from the queue
                     # and this step is necessary to have a properly working
                     # queue.
-                    queue_sem.release() # here _rcond.notify
+                    # queue_sem.release()
+                    with n_items.get_lock():
+                        n_items.value -= 1
+                    with queue_wcond:
+                        queue_wcond.notify()
                     onerror(e, obj)
 
     @staticmethod
