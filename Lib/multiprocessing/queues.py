@@ -17,6 +17,7 @@ import time
 import types
 import weakref
 import errno
+from contextlib import contextmanager
 
 from queue import Empty, Full, ShutDown
 
@@ -25,7 +26,6 @@ from . import context
 _ForkingPickler = context.reduction.ForkingPickler
 
 from .util import debug, info, Finalize, register_after_fork, is_exiting
-from contextlib import contextmanager
 
 #
 # Queue type using a pipe, buffer and thread
@@ -89,8 +89,8 @@ class Queue(object):
 
     @contextmanager
     def _handle_pending_processes(self, get_or_put):
-        # Counts pending processes. Used when queue shutdown to release
-        # pending processes.
+        # Count pending processes. Used when queue shutdowns
+        # to release pending processes.
         with self._n_pendings.get_lock():
             self._n_pendings[get_or_put] += 1
         try:
@@ -157,7 +157,7 @@ class Queue(object):
                     self._sem.release()
                 finally:
                     self._rlock.release()
-        # Decrements items counter.
+        # Decrement items counter.
         with self._n_items.get_lock():
             self._n_items.value -= 1
         # unserialize the data after having released the lock
@@ -175,7 +175,7 @@ class Queue(object):
 
     def full(self):
         return self._n_items.value == self._maxsize # TO KEEP ?
-        # return self._sem._semlock._is_zero() - TO REMOVE LATER ?
+        # return self._sem._semlock._is_zero() # TO REMOVE LATER ?
 
     def get_nowait(self):
         return self.get(False)
@@ -193,7 +193,7 @@ class Queue(object):
         with self._is_shutdown.get_lock():
             self._is_shutdown.value = True
 
-            # unblock all _GETTERS to check empty (then shutdown)
+            # Unblock all _GETTERS.
             for _ in range(self._n_pendings[Queue._GETTERS]):
                 with self._notempty:
                     if self._thread is None:
@@ -206,7 +206,7 @@ class Queue(object):
                 with self._n_items.get_lock():
                     self._n_items.value = 0
 
-            # unblock all _PUTTERS to check empty (then shutdown)
+            # Unblock all _PUTTERS.
             for _ in range(self._n_pendings[Queue._PUTTERS]):
                 self._sem.release()
 
@@ -362,7 +362,7 @@ class Queue(object):
                     # and this step is necessary to have a properly working
                     # queue.
                     queue_sem.release()
-                    # Decremenyts item counter.
+                    # Decrement items counter.
                     with n_items.get_lock():
                         n_items.value -= 1
                     onerror(e, obj)
@@ -419,15 +419,14 @@ class JoinableQueue(Queue):
                     raise ShutDown
                 raise Full
 
-        with self._notempty:
-            # self._cond is unnecessary before calling
-            # `self._unfinished_tasks.release()`, so we need only
-            # one `put` method with a call to
-            # dedicated private method class as `_class_shutdown`/`_local_method`.
-            # Here, it's contains only call to `self._unfinished_tasks.release()`.
-            # In Queue class, this method will be empty.
-            # --------------------
+        with self._notempty: #, self._cond:
+            # Here it seems to me that `self._cond` is unnecessary in
+            # the "with" instruction.
+            # So now, This method and its inherited method are identical except
+            # a call to class context. Here this is a call to
+            # `self._unfinished_tasks.release()`.
             # Comments are welcome.
+            #
             if self._is_shutdown.value:
                 raise ShutDown
             if self._thread is None:
