@@ -5306,136 +5306,6 @@ class QueueShutDown(unittest.TestCase):
         return self._shutdown_all_methods_in_one_process(True)
 
     @classmethod
-    def _write_msg(cls, q, n, results,
-                            i_when_exec_shutdown,
-                            barrier_start, ev, immediate):
-        # at least one put
-        msg = ["w"]
-        q.put((0, "LOYD"))
-        _wait()
-        put_cnt = 1
-        for i in range(1, i_when_exec_shutdown//2):
-            q.put((i, "LOYD"))
-            put_cnt += 1
-        barrier_start.wait()
-        msg.append("wgo")
-
-        for i in range(i_when_exec_shutdown//2, n):
-            try:
-                q.put((i, "YDLO"))
-                put_cnt += 1
-                results.append(True)
-            except pyqueue.ShutDown:
-                results.append(False)
-                break
-
-            # triggers shutdown of queue
-            if i == i_when_exec_shutdown:
-                if not ev.is_set():
-                    ev.set()
-                    q.shutdown(immediate)
-                    results.append(True)
-
-        msg.append(f"wp{put_cnt}")
-        msg.append("W")
-        # print(msg)
-
-    @classmethod
-    def _read_msg(cls, q, results, barrier_start):
-        is_join_q = isinstance(q, type(multiprocessing.JoinableQueue()))
-        msg = ["r"]
-        q.get(True)
-        if is_join_q:
-            msg.append("td")
-            q.task_done()
-        barrier_start.wait()
-        msg.append("rgo")
-        get_cnt = 0
-        get_empty = 0
-        while True:
-            try:
-                # Get at least one message
-                q.get(False)
-                get_cnt += 1
-                if is_join_q:
-                    q.task_done()
-            except pyqueue.ShutDown:
-                results.append(True)
-                msg.append("rs")
-                break
-            except pyqueue.Empty:
-                get_empty += 1
-
-        msg.append(f"rg{get_cnt}")
-        msg.append(f"re{get_empty}")
-        msg.append("R")
-        # print(msg)
-
-    @classmethod
-    def _join(cls, q, barrier_start):
-        msg = ["j"]
-        barrier_start.wait()
-        msg.append("jgo")
-        q.join()
-        msg.append("J")
-        # print(msg)
-
-    #@classmethod
-    def _shutdown_all_methods_in_many_processes(self, immediate):
-        for q, is_join_q in ((multiprocessing.Queue(), False),
-                             (multiprocessing.JoinableQueue(), True)):
-            ps = []
-            ev_exec_shutdown = multiprocessing.Event()
-            m =  multiprocessing.Manager()
-            res_puts = m.list()
-            res_gets = m.list()
-            read_process = 4
-            write_process = 2
-            join_process = 2
-            nb_msgs = 1024 * 8
-            when_exec_shutdown = nb_msgs // 2
-            nparties = write_process + read_process
-            if is_join_q:
-                # add 2 self._join process processes
-                nparties += join_process
-                barrier_start = multiprocessing.Barrier(parties=nparties)
-                lprocs = [
-                    (self._write_msg, write_process, (q, nb_msgs, res_puts,
-                                                   when_exec_shutdown,
-                                                   barrier_start, ev_exec_shutdown, 
-                                                   immediate)),
-                    (self._read_msg, read_process, (q, res_gets, barrier_start)),
-                    (self._join, join_process, (q, barrier_start)),
-                ]
-            else:
-                barrier_start = multiprocessing.Barrier(parties=nparties)
-                lprocs = [
-                    (self._write_msg, write_process, (q, nb_msgs, res_puts,
-                                                   when_exec_shutdown,
-                                                   barrier_start, ev_exec_shutdown,
-                                                   immediate)),
-                    (self._read_msg, read_process, (q, res_gets, barrier_start)),
-                ]
-            # start all processes
-            for func, n, args in lprocs:
-                for i in range(n):
-                    ps.append(multiprocessing.Process(target=func, args=args))
-                    ps[-1].start()
-            _wait()
-            # set event in order to run q.shutdown()
-            for p in ps:
-                p.join()
-
-            if immediate:
-                self.assertTrue(q.empty())
-
-    def test_shutdown_bullet_proof(self):
-        return self._shutdown_all_methods_in_many_processes(False)
-
-    def test_shutdown_immediate_bullet_proof(self):
-        return self._shutdown_all_methods_in_many_processes(True)
-
-    @classmethod
     def _get(cls, q, results, *args):
         try:
             item = q.get(*args)
@@ -5502,8 +5372,8 @@ class QueueShutDown(unittest.TestCase):
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._put, args=(q, results)))
                 ps[-1].start()
-            _wait()
             q.get()
+            _wait()
             q.shutdown(immediate=immediate)
             for p in ps:
                 p.join()

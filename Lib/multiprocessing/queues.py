@@ -46,13 +46,12 @@ class Queue(object):
         else:
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
+        self._is_shutdown = ctx.Value('B', False)
+        self._n_pendings = ctx.Array('Q',[0, 0])
+
         # For use by concurrent.futures
         self._ignore_epipe = False
         self._reset()
-        self._is_shutdown = ctx.Value('B', False)
-        self._n_items = ctx.Value('Q', 0)
-        self._n_pendings = ctx.Array('Q',[0, 0])
-
         if sys.platform != 'win32':
             register_after_fork(self, Queue._after_fork)
 
@@ -60,12 +59,12 @@ class Queue(object):
         context.assert_spawning(self)
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
-                self._is_shutdown, self._n_items, self._n_pendings)
+                self._is_shutdown, self._n_pendings)
 
     def __setstate__(self, state):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
-         self._is_shutdown, self._n_items, self._n_pendings) = state
+         self._is_shutdown, self._n_pendings) = state
         self._reset()
 
     def _after_fork(self):
@@ -104,35 +103,34 @@ class Queue(object):
             raise ValueError(f"Queue {self!r} is closed")
         if self._is_shutdown.value:
             raise ShutDown
-
         with self._handle_pending_processes(Queue._PUTTERS):
             if not self._sem.acquire(block, timeout):
                 if self._is_shutdown.value:
                     raise ShutDown
                 raise Full
 
+        if self._is_shutdown.value:
+            if self._n_pendings[Queue._PUTTERS] > 0:
+                self._sem.release()
+            raise ShutDown
+
         with self._notempty:
-            if self._is_shutdown.value:
-                raise ShutDown
             if self._thread is None:
                 self._start_thread()
             self._buffer.append(obj)
             self._notempty.notify()
-            # Increments items counter.
-            with self._n_items.get_lock():
-                self._n_items.value += 1
-
 
     def get(self, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
+        if self._is_shutdown.value and self.empty():
+            raise ShutDown
         if block and timeout is None:
             with self._handle_pending_processes(Queue._GETTERS):
                 with self._rlock:
                     if self._is_shutdown.value and self.empty():
                         raise ShutDown
                     res = self._recv_bytes()
-                    self._sem.release()
         else:
             if block:
                 deadline = time.monotonic() + timeout
@@ -152,18 +150,17 @@ class Queue(object):
                         if self._is_shutdown.value:
                             raise ShutDown
                         raise Empty
-
                     res = self._recv_bytes()
-                    self._sem.release()
                 finally:
                     self._rlock.release()
-        # Decrement items counter.
-        with self._n_items.get_lock():
-            self._n_items.value -= 1
-        # unserialize the data after having released the lock
+
+        # unserialize the data before having released the lock
+        # to check if it's not a shutdown sentinel.
         final_res = _ForkingPickler.loads(res)
-        if isinstance(final_res, _ShutdownSentinel) and self._is_shutdown.value:
+        if isinstance(final_res, _DummyItem) and self._is_shutdown.value:
             raise ShutDown
+
+        self._sem.release()
         return final_res
 
     def qsize(self):
@@ -171,11 +168,10 @@ class Queue(object):
         return self._maxsize - self._sem._semlock._get_value()
 
     def empty(self):
-        return not self._poll() # TO REMOVE LATER
+        return not self._poll()
 
     def full(self):
-        return self._n_items.value == self._maxsize # TO KEEP ?
-        # return self._sem._semlock._is_zero() # TO REMOVE LATER ?
+        return self._sem._semlock._is_zero()
 
     def get_nowait(self):
         return self.get(False)
@@ -185,7 +181,8 @@ class Queue(object):
 
     def _clear(self):
             while self._poll():
-                self._recv_bytes()
+                with self._rlock:
+                    self._recv_bytes()
 
     def shutdown(self, immediate=False):
         if self._closed:
@@ -193,22 +190,32 @@ class Queue(object):
         with self._is_shutdown.get_lock():
             self._is_shutdown.value = True
 
-            # Unblock all _GETTERS.
-            for _ in range(self._n_pendings[Queue._GETTERS]):
-                with self._notempty:
-                    if self._thread is None:
-                        self._start_thread()
-                    self._buffer.append(_shutdown_sentinel)
-                    self._notempty.notify()
+        # Unblock all pending getter processes.
+        # Put specific sentinel in the pipe.
+        for _ in range(self._n_pendings[Queue._GETTERS]):
+            with self._notempty:
+                if self._thread is None:
+                    self._start_thread()
+                self._buffer.append(_dummy)
+                self._notempty.notify()
+        else:
+            debug(f'on shutdown, {self._n_pendings[Queue._GETTERS]}' +
+                  'pending getter processes to release')
 
-            if immediate and not self._n_pendings[Queue._GETTERS]:
-                self._clear()
-                with self._n_items.get_lock():
-                    self._n_items.value = 0
 
-            # Unblock all _PUTTERS.
-            for _ in range(self._n_pendings[Queue._PUTTERS]):
-                self._sem.release()
+        # Unblock all pending putter processes.
+        if self._n_pendings[Queue._PUTTERS] > 0:
+            debug(f'on shutdown, {self._n_pendings[Queue._PUTTERS]}' +
+                  'pending putters processes to release')
+            # Here we start a release for a first putter.
+            # Next in the put method, this released putter checks again and
+            # releases if there are still putters until no more putters.
+            self._sem.release()
+
+        # if there are pending getters processes, queue is empty.
+        if immediate and not self._n_pendings[Queue._GETTERS]:
+            debug(f'on shutdown, clear all items in pipe')
+            self._clear()
 
     def close(self):
         self._closed = True
@@ -255,7 +262,7 @@ class Queue(object):
             args=(self._buffer, self._notempty, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
-                  self._sem, self._n_items),
+                  self._sem),
             name='QueueFeederThread',
             daemon=True,
         )
@@ -303,7 +310,7 @@ class Queue(object):
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
-              writer_close, ignore_epipe, onerror, queue_sem, n_items):
+              writer_close, ignore_epipe, onerror, queue_sem):
         debug('starting thread to feed data to pipe')
         nacquire = notempty.acquire
         nrelease = notempty.release
@@ -363,8 +370,6 @@ class Queue(object):
                     # queue.
                     queue_sem.release()
                     # Decrement items counter.
-                    with n_items.get_lock():
-                        n_items.value -= 1
                     onerror(e, obj)
 
     @staticmethod
@@ -379,8 +384,8 @@ class Queue(object):
     __class_getitem__ = classmethod(types.GenericAlias)
 
 
-class _ShutdownSentinel: pass
-_shutdown_sentinel = _ShutdownSentinel()
+class _DummyItem: pass
+_dummy = _DummyItem()
 
 
 _sentinel = object()
@@ -419,6 +424,11 @@ class JoinableQueue(Queue):
                     raise ShutDown
                 raise Full
 
+        if self._is_shutdown.value:
+            if self._n_pendings[Queue._PUTTERS] > 0:
+                self._sem.release()
+            raise ShutDown
+
         with self._notempty: #, self._cond:
             # Here it seems to me that `self._cond` is unnecessary in
             # the "with" instruction.
@@ -434,9 +444,6 @@ class JoinableQueue(Queue):
             self._buffer.append(obj)
             self._unfinished_tasks.release()
             self._notempty.notify()
-            # update n_items
-            with self._n_items.get_lock():
-                self._n_items.value += 1
 
     def task_done(self):
         with self._cond:
@@ -452,7 +459,8 @@ class JoinableQueue(Queue):
 
     def _clear(self):
         while self._poll():
-            self._recv_bytes()
+            with self._rlock:
+                self._recv_bytes()
             self._unfinished_tasks.acquire(block=False)
         with self._cond:
             self._cond.notify_all()
