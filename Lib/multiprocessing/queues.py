@@ -89,7 +89,7 @@ class Queue(object):
     @contextmanager
     def _handle_pending_processes(self, get_or_put):
         # Count pending processes. Used when queue shutdowns
-        # to release pending processes.
+        # to release all pending processes.
         with self._n_pendings.get_lock():
             self._n_pendings[get_or_put] += 1
         try:
@@ -103,6 +103,7 @@ class Queue(object):
             raise ValueError(f"Queue {self!r} is closed")
         if self._is_shutdown.value:
             raise ShutDown
+
         with self._handle_pending_processes(Queue._PUTTERS):
             if not self._sem.acquire(block, timeout):
                 if self._is_shutdown.value:
@@ -110,6 +111,7 @@ class Queue(object):
                 raise Full
 
         if self._is_shutdown.value:
+            # Released from acquire below.
             if self._n_pendings[Queue._PUTTERS] > 0:
                 self._sem.release()
             raise ShutDown
@@ -155,7 +157,7 @@ class Queue(object):
                     self._rlock.release()
 
         # unserialize the data before having released the lock
-        # to check if it's not a shutdown sentinel.
+        # to check if it's not a dummy item.
         final_res = _ForkingPickler.loads(res)
         if isinstance(final_res, _DummyItem) and self._is_shutdown.value:
             raise ShutDown
@@ -191,7 +193,7 @@ class Queue(object):
             self._is_shutdown.value = True
 
         # Unblock all pending getter processes.
-        # Put specific sentinel in the pipe.
+        # Put specific dummy data in the pipe.
         for _ in range(self._n_pendings[Queue._GETTERS]):
             with self._notempty:
                 if self._thread is None:
@@ -207,9 +209,10 @@ class Queue(object):
         if self._n_pendings[Queue._PUTTERS] > 0:
             debug(f'on shutdown, {self._n_pendings[Queue._PUTTERS]}' +
                   'pending putters processes to release')
-            # Here we start a release for a first putter.
-            # Next in the put method, this released putter checks again and
-            # releases if there are still putters until no more putters.
+            # Here we start to release for a first putter process.
+            # When this process is unblock, checks again and
+            # continue to release in cascade
+            # until there is no more putters.
             self._sem.release()
 
         # if there are pending getters processes, queue is empty.
@@ -369,7 +372,6 @@ class Queue(object):
                     # and this step is necessary to have a properly working
                     # queue.
                     queue_sem.release()
-                    # Decrement items counter.
                     onerror(e, obj)
 
     @staticmethod
@@ -384,6 +386,8 @@ class Queue(object):
     __class_getitem__ = classmethod(types.GenericAlias)
 
 
+# dummy data used to release
+# pending getter processes.
 class _DummyItem: pass
 _dummy = _DummyItem()
 
@@ -432,10 +436,11 @@ class JoinableQueue(Queue):
         with self._notempty: #, self._cond:
             # Here it seems to me that `self._cond` is unnecessary in
             # the "with" instruction.
-            # So now, This method and its inherited method are identical except
-            # a call to class context. Here this is a call to
-            # `self._unfinished_tasks.release()`.
-            # Comments are welcome.
+            # So now, this method and its inherited method are identical except
+            # a call to class instructions.
+            # Here this is a call to `self._unfinished_tasks.release()`.
+            #
+            # Comments are welcome about this remove.
             #
             if self._is_shutdown.value:
                 raise ShutDown
