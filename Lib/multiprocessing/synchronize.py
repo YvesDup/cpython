@@ -131,16 +131,49 @@ class Semaphore(SemLock):
 
     def __init__(self, value=1, *, ctx):
         SemLock.__init__(self, SEMAPHORE, value, SEM_VALUE_MAX, ctx=ctx)
+        if sys.platform == 'darwin':
+            self._count = ctx.Value('Q', value)
 
     def get_value(self):
         return self._semlock._get_value()
 
     def __repr__(self):
         try:
-            value = self._semlock._get_value()
+            value = self.get_value()
         except Exception:
             value = 'unknown'
         return '<%s(value=%s)>' % (self.__class__.__name__, value)
+
+    def __setstate__(self, state):
+        self._count = state[-1]
+        SemLock.__setstate__(self, state[:4])
+
+    def __getstate__(self):
+        return SemLock.__getstate__(self) + (self._count,)
+
+    def _make_methods(self):
+        if sys.platform == 'darwin':
+            util.debug(f"Darwin - > make_methods from {self.__class__ = }")
+            self.acquire = self._acquire_darwin
+            self.release = self._release_darwin
+            self.get_value = self._get_value_darwin
+        else:
+            super()._make_methods()
+
+    def _acquire_darwin(self, *args, **kwargs):
+        if self._semlock.acquire(*args, **kwargs):
+            with self._count.get_lock():
+                self._count.value -= 1
+            return True
+        return False
+
+    def _release_darwin(self, *args, **kwargs):
+        with self._count.get_lock():
+            self._count.value += 1
+        return self._semlock.release(*args, **kwargs)
+
+    def _get_value_darwin(self):
+        return self._count.value
 
 #
 # Bounded semaphore
@@ -150,16 +183,23 @@ class BoundedSemaphore(Semaphore):
 
     def __init__(self, value=1, *, ctx):
         SemLock.__init__(self, SEMAPHORE, value, value, ctx=ctx)
+        if sys.platform == 'darwin':
+            self._count = ctx.Value('Q', value)
 
     def __repr__(self):
         try:
-            value = self._semlock._get_value()
+            value = self.get_value()
         except Exception:
             value = 'unknown'
         return '<%s(value=%s, maxvalue=%s)>' % \
                (self.__class__.__name__, value, self._semlock.maxvalue)
 
-#
+    def _release_darwin(self, *args):
+        if self._count.value + 1 > self._semlock.maxvalue:
+            raise ValueError("Semaphore released too many times")
+        return super()._release_darwin(*args)
+
+ #
 # Non-recursive lock
 #
 
