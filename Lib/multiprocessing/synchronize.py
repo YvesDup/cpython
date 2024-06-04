@@ -144,19 +144,14 @@ class Semaphore(SemLock):
             value = 'unknown'
         return '<%s(value=%s)>' % (self.__class__.__name__, value)
 
-    def __setstate__(self, state):
-        self._count = state[-1]
-        SemLock.__setstate__(self, state[:4])
-
-    def __getstate__(self):
-        return SemLock.__getstate__(self) + (self._count,)
-
     def _make_methods(self):
         if sys.platform == 'darwin':
             util.debug(f"Darwin - > make_methods from {self.__class__ = }")
             self.acquire = self._acquire_darwin
             self.release = self._release_darwin
             self.get_value = self._get_value_darwin
+            # self.__setstate__ = self.__setstate_darwin__
+            # self.__getstate__ = self.__getstate_darwin__
         else:
             super()._make_methods()
 
@@ -174,6 +169,18 @@ class Semaphore(SemLock):
 
     def _get_value_darwin(self):
         return self._count.value
+
+    def __setstate__(self, state):
+        if sys.platform == 'darwin':
+            self._count = state[-1]
+            state = state[:-1]
+        SemLock.__setstate__(self, state)
+
+    def __getstate__(self):
+        state = SemLock.__getstate__(self)
+        if sys.platform == 'darwin':
+            return  state + (self._count,)
+        return state
 
 #
 # Bounded semaphore
