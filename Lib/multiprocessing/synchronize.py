@@ -129,9 +129,11 @@ class SemLock(object):
 
 class Semaphore(SemLock):
 
+    is_macosx = sys.platform == 'darwin'
+
     def __init__(self, value=1, *, ctx):
         SemLock.__init__(self, SEMAPHORE, value, SEM_VALUE_MAX, ctx=ctx)
-        if sys.platform == 'darwin':
+        if Semaphore.is_macosx:
             self._count = ctx.Value('Q', value)
 
     def get_value(self):
@@ -145,13 +147,10 @@ class Semaphore(SemLock):
         return '<%s(value=%s)>' % (self.__class__.__name__, value)
 
     def _make_methods(self):
-        if sys.platform == 'darwin':
-            util.debug(f"Darwin - > make_methods from {self.__class__ = }")
+        if Semaphore.is_macosx:
             self.acquire = self._acquire_darwin
             self.release = self._release_darwin
             self.get_value = self._get_value_darwin
-            # self.__setstate__ = self.__setstate_darwin__
-            # self.__getstate__ = self.__getstate_darwin__
         else:
             super()._make_methods()
 
@@ -171,15 +170,15 @@ class Semaphore(SemLock):
         return self._count.value
 
     def __setstate__(self, state):
-        if sys.platform == 'darwin':
+        if Semaphore.is_macosx:
             self._count = state[-1]
             state = state[:-1]
         SemLock.__setstate__(self, state)
 
     def __getstate__(self):
         state = SemLock.__getstate__(self)
-        if sys.platform == 'darwin':
-            return  state + (self._count,)
+        if Semaphore.is_macosx:
+            state += (self._count,)
         return state
 
 #
@@ -188,9 +187,11 @@ class Semaphore(SemLock):
 
 class BoundedSemaphore(Semaphore):
 
+    is_macosx = sys.platform == 'darwin'
+
     def __init__(self, value=1, *, ctx):
         SemLock.__init__(self, SEMAPHORE, value, value, ctx=ctx)
-        if sys.platform == 'darwin':
+        if BoundedSemaphore.is_macosx:
             self._count = ctx.Value('Q', value)
 
     def __repr__(self):
@@ -206,7 +207,7 @@ class BoundedSemaphore(Semaphore):
             raise ValueError("Semaphore released too many times")
         return super()._release_darwin(*args)
 
- #
+#
 # Non-recursive lock
 #
 
