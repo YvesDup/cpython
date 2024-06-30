@@ -1362,12 +1362,120 @@ class _TestQueue(BaseTestCase):
 
 class _TestLock(BaseTestCase):
 
+    @staticmethod
+    def _acquire(lock, l=None):
+        lock.acquire()
+        if l is not None:
+            l.append(repr(lock))
+
+    def test_repr_lock(self):
+        if self.TYPE != 'processes':
+            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+
+        lock = self.Lock()
+        self.assertEqual(f'<Lock(owner=None)>', repr(lock))
+
+        lock.acquire()
+        self.assertEqual(f'<Lock(owner=MainProcess)>', repr(lock))
+        lock.release()
+
+        tname = 'T1'
+        l = []
+        t = threading.Thread(target=self._acquire, args=(lock, l), name=tname)
+        t.start()
+        time.sleep(0.1)
+        self.assertEqual(f'<Lock(owner=MainProcess|{tname})>', l[0])
+        lock.release()
+
+        t = threading.Thread(target=self._acquire, args=(lock,), name=tname)
+        t.start()
+        time.sleep(0.1)
+        self.assertEqual('<Lock(owner=SomeOtherThread)>', repr(lock))
+        lock.release()
+
+        pname = 'P1'
+        l = multiprocessing.Manager().list()
+        p = self.Process(target=self._acquire, args=(lock, l), name=pname)
+        p.start()
+        time.sleep(0.1)
+        p.join()
+        self.assertEqual(f'<Lock(owner={pname})>', l[0])
+
+        p = self.Process(target=self._acquire, args=(lock,), name=pname)
+        p.start()
+        time.sleep(0.1)
+        self.assertEqual(f'<Lock(owner=SomeOtherProcess)>', repr(lock))
+        p.terminate()
+        time.sleep(0.1)
+
     def test_lock(self):
         lock = self.Lock()
         self.assertEqual(lock.acquire(), True)
         self.assertEqual(lock.acquire(False), False)
         self.assertEqual(lock.release(), None)
         self.assertRaises((ValueError, threading.ThreadError), lock.release)
+
+    @staticmethod
+    def _lock_n(lock, timeout, l=None, n=1):
+        for _ in range(n):
+            lock.acquire()
+        if l is not None:
+            l.append(repr(lock))
+        time.sleep(timeout)
+        for _ in range(n):
+            lock.release()
+
+    def test_repr_rlock(self):
+        if self.TYPE != 'processes':
+            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+
+        lock = self.RLock()
+        self.assertEqual('<RLock(None, 0)>', repr(lock))
+
+        n = 3
+        for _ in range(n):
+            lock.acquire()
+        self.assertEqual(f'<RLock(MainProcess, {n})>', repr(lock))
+        for _ in range(n):
+            lock.release()
+
+        t, l = [], []
+        for i in range(n):
+            t.append(threading.Thread(target=self._lock_n,
+                                      args=(lock, 0.2, l, i+1),
+                                      name=f'T{i+1}'))
+            t[-1].start()
+            time.sleep(0.1)
+        for t_ in t:
+            t_.join()
+        for i in range(n):
+            self.assertIn(f'<RLock(MainProcess|T{i+1}, {i+1})>', l)
+
+
+        t = threading.Thread(target=self._lock_n,
+                                 args=(lock, 0.2),
+                                 name=f'T1')
+        t.start()
+        time.sleep(0.1)
+        self.assertEqual('<RLock(SomeOtherThread, nonzero)>', repr(lock))
+        time.sleep(0.2)
+
+        pname = 'P1'
+        l = multiprocessing.Manager().list()
+        p = self.Process(target=self._lock_n,
+                         args=(lock, 0.1, l),
+                         name=pname)
+        p.start()
+        time.sleep(0.3)
+        p.join()
+        self.assertEqual(f'<RLock({pname}, 1)>', l[0])
+
+        p = self.Process(target=self._acquire,
+                         args=(lock,),)
+        p.start()
+        time.sleep(0.3)
+        self.assertEqual('<RLock(SomeOtherProcess, nonzero)>', repr(lock))
+        p.terminate()
 
     def test_rlock(self):
         lock = self.RLock()
