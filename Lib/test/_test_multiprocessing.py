@@ -1407,13 +1407,33 @@ class _TestSemaphore(BaseTestCase):
         self.assertEqual(sem.release(), None)
         self.assertReturnsIfImplemented(4, get_value, sem)
 
+    @unittest.skipIf(sys.platform != 'darwin', 'Darwin only')
+    def test_detect_macosx_semaphore(self):
+        if self.TYPE != 'processes':
+            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+
+        sem = self.Semaphore(2)
+        mro = sem.__class__.mro()
+        self.assertTrue(any('_MacOSXSemaphore' in cls.__name__ for cls in mro))
+        self.assertEqual(len(mro), 4)
+
     def test_bounded_semaphore(self):
         sem = self.BoundedSemaphore(2)
         self._test_semaphore(sem)
         # Currently fails on OS/X
-        #if HAVE_GETVALUE:
-        #    self.assertRaises(ValueError, sem.release)
-        #    self.assertReturnsIfImplemented(2, get_value, sem)
+        if HAVE_GETVALUE or True:
+            self.assertRaises(ValueError, sem.release)
+            self.assertReturnsIfImplemented(2, get_value, sem)
+
+    @unittest.skipIf(sys.platform != 'darwin', 'Darwin only')
+    def test_detect_macosx_boundedsemaphore(self):
+        if self.TYPE != 'processes':
+            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+
+        sem = self.BoundedSemaphore(2)
+        mro = sem.__class__.mro()
+        self.assertTrue(any('_MacOSXSemaphore' in cls.__name__ for cls in mro))
+        self.assertEqual(len(mro), 5)
 
     def test_timeout(self):
         if self.TYPE != 'processes':
