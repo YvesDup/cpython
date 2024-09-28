@@ -141,7 +141,7 @@ if IS_MACOSX:
             util.debug(f"_MacOSXSemaphore:: creation of a {self.__class__.__name__}"\
                         f"with '{value = }'")
             SemLock.__init__(self, kind, value, maxvalue, ctx=ctx)
-            # 'unsigned int' on 2 bytes depending of SEM_VALUE_MAX.
+            # 'unsigned int' on 2 bytes depending of SEM_VALUE_MAX value.
             self._count = ctx.Value('I', value)
 
         def _make_methods(self):
