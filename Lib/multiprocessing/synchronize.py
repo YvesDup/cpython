@@ -85,12 +85,8 @@ class SemLock(object):
     @staticmethod
     def _cleanup(name):
         from .resource_tracker import unregister
-        try:
-            # print(f'{name = }/{process.current_process()}'.center(120, '*'))
-            sem_unlink(name)
-            unregister(name, "semaphore")
-        except:
-            pass
+        sem_unlink(name)
+        unregister(name, "semaphore")
 
     def _make_methods(self):
         self.acquire = self._semlock.acquire
@@ -142,35 +138,37 @@ if IS_MACOSX:
         """
 
         def __init__(self, kind, value, maxvalue, *, ctx):
-            util.debug(f"MacOSXSemaphore:: creation of a {self.__class__.__name__}"\
+            util.debug(f"_MacOSXSemaphore:: creation of a {self.__class__.__name__}"\
                         f"with '{value = }'")
             SemLock.__init__(self, kind, value, maxvalue, ctx=ctx)
-            # 'unsigned int' on 2 bytes depending SEM_VALUE_MAX
+            # 'unsigned int' on 2 bytes depending of SEM_VALUE_MAX.
             self._count = ctx.Value('I', value)
 
         def _make_methods(self):
             super()._make_methods()
-            util.debug("MacOSXSemaphore: _make_methods call")
+            util.debug("_MacOSXSemaphore: _make_methods call")
             self.acquire = self._acquire
             if isinstance(self, BoundedSemaphore):
                 self.release = self._release_bounded
             elif isinstance(self, Semaphore):
                 self.release = self._release
+            else:
+                raise RuntimeError("Class dedicated only to Semaphore or BoundedSemaphore OSX")
             self.get_value = self._get_value
 
         def _acquire(self, *args, **kwargs) -> bool:
             if self._semlock.acquire(*args, **kwargs):
                 with self._count:
-                    util.debug(f"MacOSXSemaphore: acquire {repr(self)}")
+                    util.debug(f"_MacOSXSemaphore: acquire {repr(self)}")
                     self._count.value -= 1
                 return True
             return False
 
         def _release(self):
             with self._count:
-                self._semlock.release()
                 self._count.value += 1
-                util.debug(f"MacOSXSemaphore: release {repr(self)}")
+                self._semlock.release()
+                util.debug(f"_MacOSXSemaphore: release {repr(self)}")
 
         def _release_bounded(self):
             with self._count:
@@ -182,35 +180,36 @@ if IS_MACOSX:
         def _get_value(self) -> int:
             return self._count.value
 
-        # Manage counter
+        # Get counter attrib.
         def __setstate__(self, state):
             self._count, state = state[-1], state[:-1]
             super().__setstate__(state)
 
+        # Append `count`attrib.
         def __getstate__(self) -> tuple:
             return super().__getstate__() + (self._count,)
 
         def __enter__(self):
-            util.debug(f'MacOSXSemaphore: enter {repr(self)}')
-            return self._acquire()
+            util.debug(f'_MacOSXSemaphore: enter {repr(self)}')
+            return self.acquire()
 
         def __exit__(self, *args):
-            util.debug(f'MacOSXSemaphore: exit {repr(self)}')
-            return self._release()
+            util.debug(f'_MacOSXSemaphore: exit {repr(self)}')
+            return self.release()
 
 
-    _semclass = _MacOSXSemaphore
+    _SemClass = _MacOSXSemaphore
 else:
-    _semclass = SemLock
+    _SemClass = SemLock
 
 #
 # Semaphore
 #
 
-class Semaphore(_semclass):
+class Semaphore(_SemClass):
 
     def __init__(self, value=1, *, ctx):
-        _semclass.__init__(self, SEMAPHORE, value, SEM_VALUE_MAX, ctx=ctx)
+        _SemClass.__init__(self, SEMAPHORE, value, SEM_VALUE_MAX, ctx=ctx)
 
     def get_value(self):
         """redefined when MacOSX.
@@ -231,7 +230,7 @@ class Semaphore(_semclass):
 class BoundedSemaphore(Semaphore):
 
     def __init__(self, value=1, *, ctx):
-        _semclass.__init__(self, SEMAPHORE, value, value, ctx=ctx)
+        _SemClass.__init__(self, SEMAPHORE, value, value, ctx=ctx)
 
     def __repr__(self):
         try:
