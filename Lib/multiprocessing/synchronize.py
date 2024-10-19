@@ -123,7 +123,7 @@ class SemLock(object):
         return '%s-%s' % (process.current_process()._config['semprefix'],
                           next(SemLock._rand))
 
-if IS_MACOSX:
+if sys.platform == 'darwin':
     #
     # MacOSX Semaphore
     #
@@ -131,7 +131,7 @@ if IS_MACOSX:
     class _MacOSXSemaphore(SemLock):
         """Dedicated class used only to workaround the missing
         function 'sem_getvalue', when interpreter runs on MacOSX.
-        Add a shared counter for each [Bounded]Semaphore in order
+        Add a shared counter for each Bounded)Semaphore in order
         to handle internal counter when acquire and release operations
         are called.
         """
