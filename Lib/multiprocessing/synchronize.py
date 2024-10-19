@@ -131,7 +131,7 @@ if sys.platform == 'darwin':
     class _MacOSXSemaphore(SemLock):
         """Dedicated class used only to workaround the missing
         function 'sem_getvalue', when interpreter runs on MacOSX.
-        Add a shared counter for each Bounded)Semaphore in order
+        Add a shared counter for each [Bounded]Semaphore in order
         to handle internal counter when acquire and release operations
         are called.
         """

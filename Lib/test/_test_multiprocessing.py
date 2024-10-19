@@ -1423,7 +1423,6 @@ class _TestSemaphore(BaseTestCase):
         sem = self.Semaphore(2)
         mro = sem.__class__.mro()
         self.assertTrue(any('_MacOSXSemaphore' in cls.__name__ for cls in mro))
-        # self.assertEqual(len(mro), 4)
 
     @unittest.skipIf(sys.platform != 'darwin', 'Darwin only')
     def test_detect_macosx_boundedsemaphore(self):
@@ -1433,7 +1432,6 @@ class _TestSemaphore(BaseTestCase):
         sem = self.BoundedSemaphore(2)
         mro = sem.__class__.mro()
         self.assertTrue(any('_MacOSXSemaphore' in cls.__name__ for cls in mro))
-        # self.assertEqual(len(mro), 5)
 
     def test_timeout(self):
         if self.TYPE != 'processes':
