@@ -38,7 +38,6 @@ except (ImportError):
 
 RECURSIVE_MUTEX, SEMAPHORE = list(range(2))
 SEM_VALUE_MAX = _multiprocessing.SemLock.SEM_VALUE_MAX
-IS_MACOSX = sys.platform == 'darwin'
 
 #
 # Base class for semaphores and mutexes; wraps `_multiprocessing.SemLock`
@@ -132,8 +131,8 @@ if IS_MACOSX:
     class _MacOSXSemaphore(SemLock):
         """Dedicated class used only to workaround the missing
         function 'sem_getvalue', when interpreter runs on MacOSX.
-        Add a shared counter for each (Bounded)Semaphore in order
-        to handle internal value when acquire and release operations
+        Add a shared counter for each [Bounded]Semaphore in order
+        to handle internal counter when acquire and release operations
         are called.
         """
 
