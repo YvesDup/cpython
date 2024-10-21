@@ -229,32 +229,9 @@ static inline PyDictUnicodeEntry* DK_UNICODE_ENTRIES(PyDictKeysObject *dk) {
 #define DICT_VERSION_INCREMENT (1 << (DICT_MAX_WATCHERS + DICT_WATCHED_MUTATION_BITS))
 #define DICT_WATCHER_MASK ((1 << DICT_MAX_WATCHERS) - 1)
 #define DICT_WATCHER_AND_MODIFICATION_MASK ((1 << (DICT_MAX_WATCHERS + DICT_WATCHED_MUTATION_BITS)) - 1)
+#define DICT_UNIQUE_ID_SHIFT (32)
+#define DICT_UNIQUE_ID_MAX ((UINT64_C(1) << (64 - DICT_UNIQUE_ID_SHIFT)) - 1)
 
-#ifdef Py_GIL_DISABLED
-
-#define THREAD_LOCAL_DICT_VERSION_COUNT 256
-#define THREAD_LOCAL_DICT_VERSION_BATCH THREAD_LOCAL_DICT_VERSION_COUNT * DICT_VERSION_INCREMENT
-
-static inline uint64_t
-dict_next_version(PyInterpreterState *interp)
-{
-    PyThreadState *tstate = PyThreadState_GET();
-    uint64_t cur_progress = (tstate->dict_global_version &
-                            (THREAD_LOCAL_DICT_VERSION_BATCH - 1));
-    if (cur_progress == 0) {
-        uint64_t next = _Py_atomic_add_uint64(&interp->dict_state.global_version,
-                                              THREAD_LOCAL_DICT_VERSION_BATCH);
-        tstate->dict_global_version = next;
-    }
-    return tstate->dict_global_version += DICT_VERSION_INCREMENT;
-}
-
-#define DICT_NEXT_VERSION(INTERP) dict_next_version(INTERP)
-
-#else
-#define DICT_NEXT_VERSION(INTERP) \
-    ((INTERP)->dict_state.global_version += DICT_VERSION_INCREMENT)
-#endif
 
 PyAPI_FUNC(void)
 _PyDict_SendEvent(int watcher_bits,
@@ -263,7 +240,7 @@ _PyDict_SendEvent(int watcher_bits,
                   PyObject *key,
                   PyObject *value);
 
-static inline uint64_t
+static inline void
 _PyDict_NotifyEvent(PyInterpreterState *interp,
                     PyDict_WatchEvent event,
                     PyDictObject *mp,
@@ -271,12 +248,11 @@ _PyDict_NotifyEvent(PyInterpreterState *interp,
                     PyObject *value)
 {
     assert(Py_REFCNT((PyObject*)mp) > 0);
-    int watcher_bits = mp->ma_version_tag & DICT_WATCHER_MASK;
+    int watcher_bits = mp->_ma_watcher_tag & DICT_WATCHER_MASK;
     if (watcher_bits) {
         RARE_EVENT_STAT_INC(watched_dict_modification);
         _PyDict_SendEvent(watcher_bits, event, mp, key, value);
     }
-    return DICT_NEXT_VERSION(interp) | (mp->ma_version_tag & DICT_WATCHER_AND_MODIFICATION_MASK);
 }
 
 extern PyDictObject *_PyObject_MaterializeManagedDict(PyObject *obj);
@@ -333,7 +309,39 @@ _PyInlineValuesSize(PyTypeObject *tp)
 int
 _PyDict_DetachFromObject(PyDictObject *dict, PyObject *obj);
 
+// Enables per-thread ref counting on this dict in the free threading build
+extern void _PyDict_EnablePerThreadRefcounting(PyObject *op);
+
 PyDictObject *_PyObject_MaterializeManagedDict_LockHeld(PyObject *);
+
+// See `_Py_INCREF_TYPE()` in pycore_object.h
+#ifndef Py_GIL_DISABLED
+#  define _Py_INCREF_DICT Py_INCREF
+#  define _Py_DECREF_DICT Py_DECREF
+#else
+static inline Py_ssize_t
+_PyDict_UniqueId(PyDictObject *mp)
+{
+    // Offset by one so that _ma_watcher_tag=0 represents an unassigned id
+    return (Py_ssize_t)(mp->_ma_watcher_tag >> DICT_UNIQUE_ID_SHIFT) - 1;
+}
+
+static inline void
+_Py_INCREF_DICT(PyObject *op)
+{
+    assert(PyDict_Check(op));
+    Py_ssize_t id = _PyDict_UniqueId((PyDictObject *)op);
+    _Py_THREAD_INCREF_OBJECT(op, id);
+}
+
+static inline void
+_Py_DECREF_DICT(PyObject *op)
+{
+    assert(PyDict_Check(op));
+    Py_ssize_t id = _PyDict_UniqueId((PyDictObject *)op);
+    _Py_THREAD_DECREF_OBJECT(op, id);
+}
+#endif
 
 #ifdef __cplusplus
 }
