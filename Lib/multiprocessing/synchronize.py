@@ -136,7 +136,7 @@ class Semaphore(SemLock):
 
     def __repr__(self):
         try:
-            value = self._semlock._get_value()
+            value = self.get_value()
         except Exception:
             value = 'unknown'
         return '<%s(value=%s)>' % (self.__class__.__name__, value)
@@ -152,7 +152,7 @@ class BoundedSemaphore(Semaphore):
 
     def __repr__(self):
         try:
-            value = self._semlock._get_value()
+            value = self.get_value()
         except Exception:
             value = 'unknown'
         return '<%s(value=%s, maxvalue=%s)>' % \
@@ -244,8 +244,8 @@ class Condition(object):
 
     def __repr__(self):
         try:
-            num_waiters = (self._sleeping_count._semlock._get_value() -
-                           self._woken_count._semlock._get_value())
+            num_waiters = (self._sleeping_count.get_value() -
+                           self._woken_count.get_value())
         except Exception:
             num_waiters = 'unknown'
         return '<%s(%s, %s)>' % (self.__class__.__name__, self._lock, num_waiters)
