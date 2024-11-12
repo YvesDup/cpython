@@ -225,6 +225,47 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
 #define SEM_GETVALUE(sem, pval) sem_getvalue(sem, pval)
 #define SEM_UNLINK(name) sem_unlink(name)
 
+#define ENTER(output, msg) fprintf(output, "PID:%05d: '%s' l:04%d\n", getpid(), msg, __LINE__)
+#define SUB_ENTER(output, msg) fprintf(output, "\tPID:%05d: '%s' l:04%d\n", getpid(), msg, __LINE__)
+#define VALUE_SEMAPHORE_MORE_THAN_1(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
+/*----------
+void create_shm_mem(void) ;
+void check_shm_mem(void) ;
+void extend_shm_mem(void) ;
+void delete_shm_mem(void) ;
+--------------*/
+typedef void CounterObject ;
+
+CounterObject *new_counter(SemLockObject *self, int value) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+CounterObject *connect_counter(SEM_HANDLE sem) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+void close_counter(SemLockObject *self) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+void unlink_counter(SemLockObject *self) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+void on_acquire_decr_counter(SemLockObject *self) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+void on_release_incr_counter(SemLockObject *self) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+int get_counter_value(SemLockObject *self) {
+    SUB_ENTER(stdout, __func__) ;
+
+}
+
+
 /* OS X 10.4 defines SEM_FAILED as -1 instead of (sem_t *)-1;  this gives
    compiler warnings, and (potentially) undefined behaviour. */
 #ifdef __APPLE__
@@ -314,6 +355,7 @@ _multiprocessing_SemLock_acquire_impl(SemLockObject *self, int blocking,
                                       PyObject *timeout_obj)
 /*[clinic end generated code: output=f9998f0b6b0b0872 input=079ca779975f3ad6]*/
 {
+ENTER(stdout, __func__) ;
     int res, err = 0;
     struct timespec deadline = {0};
 
@@ -382,6 +424,12 @@ _multiprocessing_SemLock_acquire_impl(SemLockObject *self, int blocking,
     ++self->count;
     self->last_tid = PyThread_get_thread_ident();
 
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+    if (VALUE_SEMAPHORE_MORE_THAN_1(self)) {
+        on_acquire_decr_counter(self) ;
+    }
+#endif
+
     Py_RETURN_TRUE;
 }
 
@@ -396,6 +444,7 @@ static PyObject *
 _multiprocessing_SemLock_release_impl(SemLockObject *self)
 /*[clinic end generated code: output=b22f53ba96b0d1db input=9bd62d3645e7a531]*/
 {
+ENTER(stdout, __func__) ;
     if (self->kind == RECURSIVE_MUTEX) {
         if (!ISMINE(self)) {
             PyErr_SetString(PyExc_AssertionError, "attempt to "
@@ -449,6 +498,12 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
     if (sem_post(self->handle) < 0)
         return PyErr_SetFromErrno(PyExc_OSError);
 
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+    if (VALUE_SEMAPHORE_MORE_THAN_1(self)) {
+        on_release_incr_counter(self) ;
+    }
+#endif
+
     --self->count;
     Py_RETURN_NONE;
 }
@@ -492,6 +547,7 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
                               int maxvalue, const char *name, int unlink)
 /*[clinic end generated code: output=30727e38f5f7577a input=fdaeb69814471c5b]*/
 {
+ENTER(stdout, __func__) ;
     SEM_HANDLE handle = SEM_FAILED;
     PyObject *result;
     char *name_copy = NULL;
@@ -521,6 +577,12 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
     result = newsemlockobject(type, handle, kind, maxvalue, name_copy);
     if (!result)
         goto failure;
+
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+    if (VALUE_SEMAPHORE_MORE_THAN_1((SemLockObject *)result)) {
+        new_counter((SemLockObject *)result, value) ;
+    }
+#endif
 
     return result;
 
@@ -552,6 +614,8 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
                                        const char *name)
 /*[clinic end generated code: output=2aaee14f063f3bd9 input=f7040492ac6d9962]*/
 {
+ENTER(stdout, __func__) ;
+    PyObject *result = NULL ;
     char *name_copy = NULL;
 
     if (name != NULL) {
@@ -571,17 +635,35 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
         }
     }
 #endif
+    result = newsemlockobject(type, handle, kind, maxvalue, name_copy);
 
-    return newsemlockobject(type, handle, kind, maxvalue, name_copy);
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+    SemLockObject *self = (SemLockObject *)result ;
+
+    if (VALUE_SEMAPHORE_MORE_THAN_1(self)) {
+        // self->counter = connect_counter(handle) ;
+        connect_counter(handle) ;
+    }
+#endif
+
+    return result ;
 }
 
 static void
 semlock_dealloc(SemLockObject* self)
 {
+ENTER(stdout, __func__) ;
     PyTypeObject *tp = Py_TYPE(self);
     PyObject_GC_UnTrack(self);
-    if (self->handle != SEM_FAILED)
+    if (self->handle != SEM_FAILED) {
         SEM_CLOSE(self->handle);
+
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+        if (VALUE_SEMAPHORE_MORE_THAN_1(self)) {
+            close_counter(self) ;
+        }
+#endif
+    }
     PyMem_Free(self->name);
     tp->tp_free(self);
     Py_DECREF(tp);
@@ -598,6 +680,7 @@ static PyObject *
 _multiprocessing_SemLock__count_impl(SemLockObject *self)
 /*[clinic end generated code: output=5ba8213900e517bb input=9fa6e0b321b16935]*/
 {
+ENTER(stdout, __func__) ;
     return PyLong_FromLong((long)self->count);
 }
 
@@ -611,6 +694,7 @@ static PyObject *
 _multiprocessing_SemLock__is_mine_impl(SemLockObject *self)
 /*[clinic end generated code: output=92dc98863f4303be input=a96664cb2f0093ba]*/
 {
+ENTER(stdout, __func__) ;
     /* only makes sense for a lock */
     return PyBool_FromLong(ISMINE(self));
 }
@@ -625,7 +709,11 @@ static PyObject *
 _multiprocessing_SemLock__get_value_impl(SemLockObject *self)
 /*[clinic end generated code: output=64bc1b89bda05e36 input=cb10f9a769836203]*/
 {
+ENTER(stdout, __func__) ;
 #ifdef HAVE_BROKEN_SEM_GETVALUE
+    if (VALUE_SEMAPHORE_MORE_THAN_1(self)) {
+        get_counter_value(self) ;
+    }
     PyErr_SetNone(PyExc_NotImplementedError);
     return NULL;
 #else
@@ -650,6 +738,7 @@ static PyObject *
 _multiprocessing_SemLock__is_zero_impl(SemLockObject *self)
 /*[clinic end generated code: output=815d4c878c806ed7 input=294a446418d31347]*/
 {
+ENTER(stdout, __func__) ;
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (sem_trywait(self->handle) < 0) {
         if (errno == EAGAIN)
@@ -678,6 +767,7 @@ static PyObject *
 _multiprocessing_SemLock__after_fork_impl(SemLockObject *self)
 /*[clinic end generated code: output=718bb27914c6a6c1 input=190991008a76621e]*/
 {
+ENTER(stdout, __func__) ;
     self->count = 0;
     Py_RETURN_NONE;
 }
@@ -791,12 +881,17 @@ PyType_Spec _PyMp_SemLockType_spec = {
 PyObject *
 _PyMp_sem_unlink(const char *name)
 {
+ENTER(stdout, __func__) ;
     if (SEM_UNLINK(name) < 0) {
         _PyMp_SetError(NULL, MP_STANDARD_ERROR);
+//#ifdef HAVE_BROKEN_SEM_GETVALUE
+//        if (VALUE_SEMAPHORE_MORE_THAN_1(self)) {
+//            unlink_counter(self) ;
+//        }
+//#endif
         return NULL;
     }
 
     Py_RETURN_NONE;
 }
-
 #endif // HAVE_MP_SEMAPHORE
