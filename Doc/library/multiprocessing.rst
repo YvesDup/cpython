@@ -1477,6 +1477,15 @@ object -- see :ref:`multiprocessing-managers`.
    A solitary difference from its close analog exists: its ``acquire`` method's
    first argument is named *block*, as is consistent with :meth:`Lock.acquire`.
 
+   .. method:: get_value()
+
+      Return the current value of semaphore.
+
+   .. warning::
+
+      On macOS, ``sem_getvalue()`` is not implemented. When this method is called,
+      a :exc:`NotImplementedError` exception is raised.
+
 .. note::
 
    On macOS, ``sem_timedwait`` is unsupported, so calling ``acquire()`` with
