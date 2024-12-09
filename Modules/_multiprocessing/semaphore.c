@@ -226,7 +226,7 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
 |  nb_semlocks   | handle        |               |            |            |
 |  max_semlocks  | handle_lock   |               |            |            |
 |                | current_value |               |            |            |
-|                | ref_handle    |               |            |            |
+|                | handle_ref    |               |            |            |
 +----------------+---------------+------/  /-----+------------+------------+
 
 ---*/
@@ -246,7 +246,7 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
         SEM_HANDLE handle_lock ; // Lock to update current_value of semaphore.
         int current_value ; // Update on each acquire/release. Start semaphore value > 1.
         char sem_name[24] ; // name copy of semaphore.
-        SEM_HANDLE ref_handle ; // Reference to the primary ref handle.
+        SEM_HANDLE handle_ref ; // Reference to the primary ref handle.
     } CounterObject ;
 
     /*-----------
@@ -297,17 +297,19 @@ typedef struct {
 #define ISMINE(o) (o->count > 0 && PyThread_get_thread_ident() == o->last_tid)
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1)
 
-/*------
+/*------*/
 #define ENTER(output, msg) fprintf(output, "PID:%05d: '%s' l:%d\n", getpid(), msg, __LINE__)
 #define ENTER_STR(output, msg, str) fprintf(output, "PID:%05d: '%s' -> '%s' l:%d\n", getpid(), msg, str, __LINE__)
 #define SUB_ENTER(output, msg) fprintf(output, "\tPID:%05d: '%s' l:%d\n", getpid(), msg, __LINE__)
 #define SUB_ENTER_STR(output, msg, str) fprintf(output, "\tPID:%05d: '%s' -> '%s' l:%d\n", getpid(), msg, str, __LINE__)
--------*/
+/*-------*/
 
+/*------
 #define ENTER(output, msg) 0
 #define ENTER_STR(output, msg, str) 0
 #define SUB_ENTER(output, msg)  0
 #define SUB_ENTER_STR(output, msg, str) 0 ;
+------*/
 
 #include <sys/mman.h>   // shm_open, shm_unlink
 
@@ -400,7 +402,7 @@ char *str_counter(char *p, CounterObject *counter){
     sprintf(p, "(%s, H:%d, L:%d, R:%d)", counter->sem_name,
                                                     counter->handle,
                                                     counter->handle_lock,
-                                                    counter->ref_handle) ;
+                                                    counter->handle_ref) ;
     return p ;
 }
 
@@ -624,12 +626,39 @@ static CounterObject* _search_counter_free_slot(void) {
     return (CounterObject *)NULL ;
 }
 
-static CounterObject *_new_counter(SemLockObject *self, SEM_HANDLE ref_handle, int value) {
+#define NO_VALUE -1
+static CounterObject *_new_counter(SemLockObject *self, SEM_HANDLE handle_ref, int value) {
     char buf[256], buf2[128] ;
     ENTER(stdout, __func__) ;
-    CounterObject *counter = NULL, *ref_counter = 1 ;
+    CounterObject *counter = NULL ;
     HeaderObject *header =  &shm_semlock_counters.counters->header ;
+    SEM_HANDLE handle_lock = (SEM_HANDLE)SEM_FAILED ;
 
+    // search if handle
+    if (handle_ref != (SEM_HANDLE)0) {
+        handle_lock = _connect_lock_extend_name(self->name) ;
+        sprintf(buf, "Connect Handle: %d, Handle lock: %d, from handle_ref:%d", self->handle, handle_lock, handle_ref) ;
+        SUB_ENTER_STR(stdout, __func__, buf) ;
+
+        // search for existing couple (handle_ref, handle_lock)
+        int i = 0, j = 0 ;
+        counter = shm_semlock_counters.counters->array_counters ;
+        while(i < header->max_semlocks && j < header->nb_semlocks) {
+            SUB_ENTER_STR(stdout, __func__, str_counter(buf, counter)) ;
+            if(counter->handle == self->handle && counter->handle_lock == handle_lock) {
+                SUB_ENTER_STR(stdout, __func__, "find same couple dont add ....") ;
+                return counter ;
+            }
+            // One counter tested.
+            if(counter->handle != (SEM_HANDLE)0 && counter->handle_lock != (SEM_HANDLE)0) {
+                ++j ;
+            }
+            ++i ;
+            ++counter ;
+        }
+    }
+
+    SUB_ENTER_STR(stdout, __func__, "NEW COUNTER") ;
     // find an available slot
     counter = _search_counter_free_slot() ;
     if (counter == NULL) {
@@ -640,31 +669,19 @@ static CounterObject *_new_counter(SemLockObject *self, SEM_HANDLE ref_handle, i
         sprintf(buf,"%s %d", str_counter(buf2, counter), value) ;
         SUB_ENTER_STR(stdout, __func__, buf) ;
 
+        // create a lock
+        if(handle_ref == (SEM_HANDLE)0) {
+            handle_lock = _create_lock_extend_name(self->name) ;
+            sprintf(buf, "Create Handle lock: %d, handle_ref:%d", handle_lock, handle_ref) ;
+            SUB_ENTER_STR(stdout, __func__, buf) ;
+        }
         // update self counter
         self->counter = counter ;
-
-        // copies from semlock
         counter->handle = self->handle ;
         strcpy(counter->sem_name, self->name) ;
-        counter->ref_handle = ref_handle ;
-
-        // create a lock
-        if(ref_handle == (SEM_HANDLE)0) {
-            counter->handle_lock = _create_lock_extend_name(self->name) ;
-            sprintf(buf, "Create Handle lock: %d, ref_handle:%d", counter->handle_lock, counter->ref_handle) ;
-        } else {
-            counter->handle_lock = _connect_lock_extend_name(self->name) ;
-            sprintf(buf, "Connect Handle lock: %d, ref_handle:%d", counter->handle_lock, counter->ref_handle) ;
-        }
-        SUB_ENTER_STR(stdout, __func__, buf) ;
-        if(ref_handle != (SEM_HANDLE)0) {
-            ref_counter = _search_counter_from_handle(counter->ref_handle) ;
-            if (ref_counter) {
-                ref_handle = ref_counter->handle ;
-            }
-        }
-        // save value
+        counter->handle_ref = handle_ref ;
         counter->current_value = value ;
+        counter->handle_lock = handle_lock ;
 
         // update header
         ++header->nb_semlocks ;
@@ -675,7 +692,7 @@ static CounterObject *_new_counter(SemLockObject *self, SEM_HANDLE ref_handle, i
     return counter ;
 }
 
-CounterObject *connect_counter(SemLockObject *self, SEM_HANDLE ref_handle) {
+CounterObject *connect_counter(SemLockObject *self, SEM_HANDLE handle_ref) {
     // On MacOSX, two open_sem calls to the same named semaphore return
     // two different handles. So we have to store them in shared mem.
     ENTER(stdout, __func__) ;
@@ -687,9 +704,9 @@ CounterObject *connect_counter(SemLockObject *self, SEM_HANDLE ref_handle) {
         create_shm_semlock_counters() ;
     }
     if (ACQUIRE_GENERAL_LOCK) {
-        if (self->handle != ref_handle) {
-            counter = _new_counter(self, ref_handle, -1) ;
-            sprintf(buf,"%s %d", str_counter(buf2, counter), ref_handle) ;
+        if (self->handle != handle_ref) {
+            counter = _new_counter(self, handle_ref, NO_VALUE) ;
+            sprintf(buf,"%s %d", str_counter(buf2, counter), handle_ref) ;
             SUB_ENTER_STR(stdout, __func__, buf) ;
         }
         RELEASE_GENERAL_LOCK ;
@@ -748,15 +765,14 @@ int _on_update_counter_value(CounterObject *counter, int incr) {
     int value = -1 ;
 
     // Counter lock already locked.
-    if (counter) {
-        while(counter->ref_handle != (SEM_HANDLE)0) {
-            counter = _search_counter_from_handle(counter->ref_handle) ;
-        }
-        counter->current_value += incr ;
-
-        // recopy counter
-        return counter->current_value ;
+    while(counter && counter->handle_ref != (SEM_HANDLE)0) {
+        counter = _search_counter_from_handle(counter->handle_ref) ;
     }
+    if (counter) {
+        counter->current_value += incr ;
+        value = counter->current_value ;
+    }
+    return value ;
 }
 
 int _on_get_counter_value(CounterObject *counter) {
@@ -765,14 +781,11 @@ int _on_get_counter_value(CounterObject *counter) {
     int value = -1 ;
 
     // Counter lock already locked.
+    while(counter && counter->handle_ref != (SEM_HANDLE)0) {
+        counter = _search_counter_from_handle(counter->handle_ref) ;
+    }
     if (counter) {
-        while(counter->ref_handle != (SEM_HANDLE)0) {
-            counter = _search_counter_from_handle(counter->ref_handle) ;
-        }
-        if (counter) {
-            return counter->current_value ;
-        }
-
+        value = counter->current_value ;
     }
     return value ;
 }
@@ -790,8 +803,6 @@ int on_get_counter_value(CounterObject *counter) {
 
         // release counter lock
         RELEASE_COUNTER_LOCK(counter) ;
-    } else {
-        puts("no acquire") ;
     }
     return value ;
 }
@@ -1155,10 +1166,11 @@ ENTER(stdout, __func__) ;
         goto failure;
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
+    sprintf(buf, "name:%s, Handle: %d", name, handle) ;
+    SUB_ENTER_STR(stdout, __func__, buf) ;
+
     if (ISSEMAPHORE((SemLockObject *)result)) {
-        CounterObject *c = new_counter((SemLockObject *)result, value) ;
-        sprintf(buf, "%p -> Handle Lock: %d", c, c->handle_lock) ;
-        SUB_ENTER_STR(stdout, __func__, buf) ;
+        new_counter((SemLockObject *)result, value) ;
     }
 #endif
 
@@ -1198,7 +1210,7 @@ ENTER(stdout, __func__) ;
     PyObject *result = NULL ;
     char *name_copy = NULL;
 #ifdef HAVE_BROKEN_SEM_GETVALUE
-    SEM_HANDLE ref_handle = handle ;
+    SEM_HANDLE handle_ref = handle ;
 #endif
 
     if (name != NULL) {
@@ -1221,11 +1233,11 @@ ENTER(stdout, __func__) ;
     result = newsemlockobject(type, handle, kind, maxvalue, name_copy);
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
-    sprintf(buf, "name:%s, Handle: %d vs Ref Handle: %d", name, handle, ref_handle) ;
+    sprintf(buf, "name:%s, Handle: %d vs Ref Handle: %d", name, handle, handle_ref) ;
     SUB_ENTER_STR(stdout, __func__, buf) ;
 
     if (ISSEMAPHORE((SemLockObject *)result)) {
-        CounterObject *c = connect_counter((SemLockObject *)result, ref_handle) ;
+        connect_counter((SemLockObject *)result, handle_ref) ;
     }
 #endif
     return result ;
