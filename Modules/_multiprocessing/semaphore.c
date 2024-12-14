@@ -242,17 +242,17 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
     } HeaderObject ;
 
     typedef struct _co {
-        SEM_HANDLE handle ; // Current handle semphore.
+        SEM_HANDLE handle ;      // Current handle semphore.
         SEM_HANDLE handle_lock ; // Lock to update current_value of semaphore.
-        SEM_HANDLE handle_ref ; // Reference to the primary ref handle.
-        int current_value ; // Update on each acquire/release. Start semaphore value > 1.
-        char sem_name[12] ; // name copy of semaphore.
+        SEM_HANDLE handle_ref ;  // Reference to the primary ref handle.
+        int current_value ;      // Update on each acquire/release. Start semaphore value > 1.
+        char sem_name[12] ;      // name copy of semaphore.
     } CounterObject ;
 
     /*-----------
     mmap allocate at least a 4096 bytes block.
     So calculate size of counters array. First 'item' is
-    used as header
+    used as header.
     -------------*/
     #define MAX_COUNTERS  ((4096/sizeof(CounterObject))-1)
 
@@ -332,40 +332,6 @@ CountersWorkaround shm_semlock_counters = {
     .counters = (SharedCounters *)NULL,
 } ;
 
-/*-----------
-static char chars[] = "abcdefghijklmnopqrstuvwxyz_9876543210" ;
-static int l = sizeof(chars)-1 ; // exclude '\0'
-char *make_name(char *buf, const char *prefix, int n) {
-    char *ref = buf;
-    int i = 0 ;
-
-    if (prefix) {
-        strcpy(buf, prefix) ;
-        buf += strlen(buf) ;
-    }
-    while (i++ < n && (*buf++ = chars[rand()%l])) ;
-    *buf = 0 ;
-
-    return ref ;
-}
-
-#define SIZE    9
-static char gh_name[SIZE+1] = "_gh125828" ;
-static int base_len = SIZE ;
-static char *_make_sem_name2(char *buf, const char *name) {
-    int base_len = 3 ;
-    char *pbuf= buf + base_len ;
-    strncpy(buf, name, base_len) ; // The 3 first chars
-    name += base_len ;
-    for(int i = 0 ; i < SIZE ; i++){ // Mix chars of each name
-        *pbuf++ = *name++ ;
-        *pbuf++ = gh_name[i] ;
-    }
-    *pbuf = 0 ;
-    return buf ;
-}
----------------------------*/
-
 static char *gh_name = "_gh125828" ;
 static char *_make_sem_name(char *buf, const char *name) {
     strcpy(buf, name) ;
@@ -380,6 +346,7 @@ static SEM_HANDLE _create_lock_extend_name(char *name) {
     int flags = O_CREAT | O_EXCL ;
     SEM_HANDLE sem = SEM_FAILED ;
     char buf[24] ;  // size name is defined in python SemLock class as '/sm-<eight chars>'
+
     _make_sem_name(buf, name) ;
     SUB_ENTER_STR(stdout, __func__, buf) ;
 
@@ -392,6 +359,7 @@ static SEM_HANDLE _connect_lock_extend_name(char *name) {
 
     SEM_HANDLE sem = SEM_FAILED ;
     char buf[24] ; // size name is defined in python SemLock class as '/sm-<eight chars>'
+
     _make_sem_name(buf, name) ;
     SUB_ENTER_STR(stdout, __func__, buf) ;
 
@@ -407,22 +375,28 @@ char *str_counter(char *p, CounterObject *counter){
     return p ;
 }
 
-void dump_shm_semlock_counters(void) {
-    char buf[128] ;
+void dump_shm_semlock(void) {
     if (shm_semlock_counters.valid) {
         printf("shm: %d\n", shm_semlock_counters.handle_shm) ;
         printf("sem: %p\n", shm_semlock_counters.handle_gmlock) ;
         printf("max_semloks: %d\n", shm_semlock_counters.counters->header.max_semlocks) ;
         printf("nb_semloks: %d\n", shm_semlock_counters.counters->header.nb_semlocks) ;
         printf("counters: %p\n", shm_semlock_counters.counters->array_counters) ;
+    }
+}
+
+void dump_shm_semlock_counters(void) {
+    char buf[128] ;
+
+    if (shm_semlock_counters.valid) {
         CounterObject *counter = shm_semlock_counters.counters->array_counters ;
         for( int i = 0, j = 0 ; i < shm_semlock_counters.counters->header.max_semlocks
                                 && j < shm_semlock_counters.counters->header.nb_semlocks ; i++ ) {
             if (counter->handle_lock != (SEM_HANDLE)0) {
                 puts(str_counter(buf, counter)) ;
                 ++j ;
-                ++counter ;
             }
+            ++counter ;
         }
     }
 }
@@ -432,7 +406,6 @@ void create_shm_semlock_counters(void) {
     int oflag = O_RDWR ;
     int shm = -1 ;
     int res = -1 ;
-    // int mode = 0x600 ;
     char *action ;
     SEM_HANDLE sem = SEM_FAILED ;
     char buf[256] ;
@@ -499,11 +472,11 @@ void create_shm_semlock_counters(void) {
                 for( int i = 0, j = 0 ; i < shm_semlock_counters.counters->header.max_semlocks
                                         && j < shm_semlock_counters.counters->header.nb_semlocks ; i++ ) {
                     if (counter->handle_lock != (SEM_HANDLE)0) {
-                        sprintf(buf, "PID:%d: sem: %s\n", pid, str_counter(buf, counter)) ;
+                        sprintf(buf, "sem: %s", str_counter(buf, counter)) ;
                         SUB_ENTER_STR(stdout, __func__,  buf) ;
                         ++j ;
-                        ++counter ;
                     }
+                    ++counter ;
                 }
             }
         }
@@ -598,22 +571,6 @@ static CounterObject* _search_counter_from_handle(SEM_HANDLE handle) {
     return (CounterObject *)NULL ;
 }
 
-/*----------
-static CounterObject* search_counter_from_handle(SEM_HANDLE handle) {
-    CounterObject *counter = NULL ;
-
-    // lock global lock
-    if (ACQUIRE_GENERAL_LOCK) {
-        // find an available slot
-        counter = _search_counter_from_handle(handle) ;
-
-        // release global lock
-        RELEASE_GENERAL_LOCK ;
-    }
-    return counter ;
-}
-------------*/
-
 static CounterObject* _search_counter_free_slot(void) {
     ENTER(stdout, __func__) ;
 
@@ -658,7 +615,7 @@ static CounterObject *_new_counter(SemLockObject *self, SEM_HANDLE handle_ref, i
             SUB_ENTER_STR(stdout, __func__, str_counter(buf, counter)) ;
             if(counter->handle == self->handle && counter->handle_lock == self->handle_lock
                 && counter->handle_ref == handle_ref) {
-                SUB_ENTER_STR(stdout, __func__, "find same triplette dont add ....") ;
+                SUB_ENTER_STR(stdout, __func__, "find same triplette, dont add ....") ;
                 self->counter = counter ;
                 return counter ;
             }
@@ -748,7 +705,7 @@ CounterObject *new_counter(SemLockObject *self, int value) {
 
 void unlink_close_counter(SemLockObject *self) {
     char buf[128] ;
-    ENTER_STR(stdout, __func__, str_counter(buf, self->counter)) ;
+    //ENTER_STR(stdout, __func__, str_counter(buf, self->counter)) ;
 
     CounterObject *counter = NULL ;
     HeaderObject *header = &shm_semlock_counters.counters->header ;
@@ -771,9 +728,8 @@ void unlink_close_counter(SemLockObject *self) {
 }
 
 int _on_update_counter_value(CounterObject *counter, int incr) {
-    char buf[128] ;
-    ENTER_STR(stdout, __func__, str_counter(buf, counter)) ;
-
+    //char buf[128] ;
+    //ENTER_STR(stdout, __func__, str_counter(buf, counter)) ;
     int value = -1 ;
 
     // Counter lock already locked.
@@ -788,8 +744,8 @@ int _on_update_counter_value(CounterObject *counter, int incr) {
 }
 
 int _on_get_counter_value(CounterObject *counter) {
-    char buf[128] ;
-    ENTER_STR(stdout, __func__, str_counter(buf, counter)) ;
+    //char buf[128] ;
+    //ENTER_STR(stdout, __func__, str_counter(buf, counter)) ;
     int value = -1 ;
 
     // Counter lock already locked.
