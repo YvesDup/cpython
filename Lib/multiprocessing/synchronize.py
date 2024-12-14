@@ -71,7 +71,7 @@ class SemLock(object):
                 obj._semlock._after_fork()
             util.register_after_fork(self, _after_fork)
 
-        if self._semlock.name is not None:
+        if not unlink_now and self._semlock.name is not None:
             # We only get here if we are on Unix with forking
             # disabled.  When the object is garbage collected or the
             # process shuts down we unlink the semaphore name
@@ -153,7 +153,8 @@ class BoundedSemaphore(Semaphore):
     def __repr__(self):
         try:
             value = self._semlock._get_value()
-        except Exception:
+        except Exception as e:
+            print(e)
             value = 'unknown'
         return '<%s(value=%s, maxvalue=%s)>' % \
                (self.__class__.__name__, value, self._semlock.maxvalue)

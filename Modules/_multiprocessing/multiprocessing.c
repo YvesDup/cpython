@@ -187,22 +187,6 @@ static PyMethodDef module_methods[] = {
     {NULL}
 };
 
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-
-extern void create_shm_semlock_counters(void) ; // from semaphore.c
-extern void delete_shm_semlock_counters(void) ; // from semaphore.c
-
-/*
- Finalize
- */
-
-static void
-multiprocessing_free(void *module)
-{
-    delete_shm_semlock_counters() ;
-}
-#endif
-
 /*
  * Initialize
  */
@@ -302,9 +286,6 @@ static struct PyModuleDef multiprocessing_module = {
     .m_size = 0,
     .m_methods = module_methods,
     .m_slots = multiprocessing_slots,
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-    .m_free = (freefunc)multiprocessing_free,
-#endif
 };
 
 PyMODINIT_FUNC

@@ -45,6 +45,7 @@ class InitializerMixin(ExecutorMixin):
         super().setUp()
 
     def test_initializer(self):
+        print("X")
         futures = [self.executor.submit(get_init_status)
                    for _ in range(self.worker_count)]
 
@@ -71,25 +72,31 @@ class FailingInitializerMixin(ExecutorMixin):
         super().setUp()
 
     def test_initializer(self):
+        print("0")
         with self._assert_logged('ValueError: error in initializer'):
             try:
+                print("1")
                 future = self.executor.submit(get_init_status)
             except BrokenExecutor:
                 # Perhaps the executor is already broken
                 pass
             else:
+                print("2")
                 with self.assertRaises(BrokenExecutor):
                     future.result()
 
             # At some point, the executor should break
+            print("3")
             for _ in support.sleeping_retry(support.SHORT_TIMEOUT,
                                             "executor not broken"):
                 if self.executor._broken:
                     break
+            print("4")
 
             # ... and from this point submit() is guaranteed to fail
             with self.assertRaises(BrokenExecutor):
                 self.executor.submit(get_init_status)
+            print("5")
 
     @contextlib.contextmanager
     def _assert_logged(self, msg):

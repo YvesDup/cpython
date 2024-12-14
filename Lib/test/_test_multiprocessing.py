@@ -1465,7 +1465,6 @@ class _TestLock(BaseTestCase):
         for i in range(n):
             self.assertIn(f'<RLock(MainProcess|T{i+1}, {i+1})>', l)
 
-
         t = threading.Thread(target=self._acquire_release,
                                  args=(lock, 0.2),
                                  name=f'T1')
@@ -1533,10 +1532,9 @@ class _TestSemaphore(BaseTestCase):
     def test_bounded_semaphore(self):
         sem = self.BoundedSemaphore(2)
         self._test_semaphore(sem)
-        # Currently fails on OS/X
-        #if HAVE_GETVALUE:
-        #    self.assertRaises(ValueError, sem.release)
-        #    self.assertReturnsIfImplemented(2, get_value, sem)
+        # Now succeeds on OS/X, see gh125828.
+        self.assertRaises(ValueError, sem.release)
+        self.assertReturnsIfImplemented(2, get_value, sem)
 
     def test_timeout(self):
         if self.TYPE != 'processes':
@@ -4959,6 +4957,23 @@ class _TestLogging(BaseTestCase):
 #
 #         logger.warn('foo')
 #         assert self.__handled
+
+class _TestMacOSXSemaphoreExpand(BaseTestCase):
+
+    ALLOWED_TYPES = ('processes',)
+    @unittest.skipIf(sys.platform != "darwin", "MacOSX only")
+    def test_extend_shd_(self):
+        # see macro MAX_SEMCOUNTERS
+        # in file ./Modules/_multiprocessing/semaphore_macosx.h.
+        # Creates 150 semaphores in order to expand shared memory.
+        try:
+            n = 150
+            s = [self.BoundedSemaphore(i) for i in range(1,n)]
+            self.assertEqual(s[-1].get_value(), n-1)
+            with self.assertRaises(ValueError):
+                s[0].release()
+        except:
+            pass
 
 #
 # Check that Process.join() retries if os.waitpid() fails with EINTR
