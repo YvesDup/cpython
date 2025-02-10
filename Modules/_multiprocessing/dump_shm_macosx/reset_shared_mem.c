@@ -45,6 +45,8 @@ int main(int argc, char *argv[]) {
     puts("--------");
     connect_shm_semlock_counters();
     puts("+++++++++");
+    dump_shm_semlock_header_counters();
+    dump_shm_semlock_header();
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
         puts("confirm (Y/N):");
         c = getchar();

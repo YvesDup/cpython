@@ -1,6 +1,7 @@
 #ifndef SEMAPHORE_MACOSX_H
 #define SEMAPHORE_MACOSX_H
 
+#include <unistd.h>     // sysconf(SC_PAGESIZE)
 #include <sys/mman.h>   // shm_open, shm_unlink
 #include <assert.h>     // assert
 
@@ -25,11 +26,14 @@ typedef struct {
 } CounterObject;
 
 /*-----------
-mmap allocate at least a 4096 bytes block.
+mmap allocate at least a PAGESIZE bytes block.
+This value could be get throught a sysconf(SC_PAGESIZE).
 Size of counters array is evaluted regarding size of
 CounterObject. First 'item' is used as header.
 -------------*/
-#define MAX_COUNTERS  ((4096/sizeof(CounterObject))-1)
+
+#define BASE_ALLOCATE 4096*4 // sysconf(_SC_PAGESIZE)
+#define MAX_COUNTERS  ((BASE_ALLOCATE/sizeof(CounterObject))-1)
 
 typedef struct {
     HeaderObject header;
@@ -57,7 +61,7 @@ typedef struct {
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind >= SEMAPHORE)
 #define NO_VALUE (-11111111)
 
-#define _DEBUG_SEMAPHORE  1
+#define _DEBUG_SEMAPHORE  0
 #define STR_SEMAPHORE_LOG(m, s) do { \
                                     char buf[256]; \
                                     PyOS_snprintf(buf, sizeof(buf), \

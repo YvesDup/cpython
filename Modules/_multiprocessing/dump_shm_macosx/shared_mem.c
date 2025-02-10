@@ -20,8 +20,7 @@ puts(__func__);
     int shm = -1;
     int res = -1;
     SEM_HANDLE sem = SEM_FAILED;
-    int size_shm = (sizeof(HeaderObject) + (sizeof(CounterObject)*MAX_COUNTERS));
-
+    int size_shm = sysconf(_SC_PAGESIZE);
     // Install signals.
     signal(SIGTERM, &sigterm);
     signal(SIGINT, &sigterm);

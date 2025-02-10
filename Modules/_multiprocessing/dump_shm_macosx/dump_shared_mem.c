@@ -70,6 +70,7 @@ int main(int argc, char *argv[]) {
         }
     } else {
         puts("dump_shared_mem <repeat> <delay> where:\n repeat (-1 is infinite) and delay between two dumps (us)\n");
+        return 1;
     }
 
     printf("Repeat:%d, udelay:%lu\n", repeat, udelay);
