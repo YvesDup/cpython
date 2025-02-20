@@ -5,7 +5,8 @@ extern CountersWorkaround shm_semlock_counters;
 extern HeaderObject *header;
 extern CounterObject *counter;
 
-void connect_shm_semlock_counters(void);
+void connect_shm_semlock_counters(int unlink,  int force_connect, int release_lock);
+void delete_shm_semlock_counters_without_unlink(void);
 void delete_shm_semlock_counters(void);
 
 void dump_shm_semlock_header(void);

@@ -6,6 +6,8 @@
 #include <semaphore.h> // sem_t
 typedef sem_t *SEM_HANDLE;
 
+#define MAX_SHOW_LOCKS  32
+
 #include "../semaphore_macosx.h"
 #include "shared_mem.h"
 
@@ -17,39 +19,42 @@ CountersWorkaround shm_semlock_counters = {
     .create_shm = 0,
     .name_gmlock = "/mp_gh125828",
     .handle_gmlock = (SEM_HANDLE)0,
-    .counters = (SharedCounters *)NULL,
+    .header = (HeaderObject *)NULL,
+    .counters = (CounterObject *)NULL,
 };
 
 HeaderObject *header = NULL;
 CounterObject *counter =  NULL;
 
 static char *show_counter(char *p, CounterObject *counter) {
-    sprintf(p, "(n:%s, v:%d, p:%d, r:%d)", counter->sem_name,
+    sprintf(p, "p:%p, n:%s, v:%d, r:%d, t:%s", counter,
+                                           counter->sem_name,
                                            counter->internal_value,
-                                           counter->n_procs,
-                                           counter->reset_counter);
+                                           counter->reset_counter,
+                                           ctime(&counter->ctimestamp));
     return p;
 }
 
 static void dump_shm_semlock_counters(void) {
 puts(__func__);
 
-    char buf[128];
+    char buf[256];
     int i = 0, j = 0;
 
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
-        if (ACQUIRE_GENERAL_LOCK) {
-            CounterObject *counter = shm_semlock_counters.counters->array_counters;
-            HeaderObject *header = &shm_semlock_counters.counters->header;
-            dump_shm_semlock_header_counters();
-            dump_shm_semlock_header();
-            for(;i < header->max_slots && j < header->nb_semlocks;i++, counter++ ) {
-                if (counter->sem_name[0] != 0) {
-                    puts(show_counter(buf, counter));
-                    ++j;
-                }
+        CounterObject *counter = shm_semlock_counters.counters;
+        HeaderObject *header = shm_semlock_counters.header;
+        dump_shm_semlock_header_counters();
+        dump_shm_semlock_header();
+        int show_max = header->n_semlocks > MAX_SHOW_LOCKS ? MAX_SHOW_LOCKS : header->n_semlocks;
+        for(; i < header->n_slots && j < show_max; i++, counter++ ) {
+            if (counter->sem_name[0] != 0) {
+                printf("%s", show_counter(buf, counter));
+                ++j;
             }
-            RELEASE_GENERAL_LOCK;
+        }
+        if (show_max < header->n_semlocks) {
+            printf("......\n--------- More %d Semphores ---------\n", header->n_semlocks-show_max);
         }
     }
 }
@@ -57,10 +62,13 @@ puts(__func__);
 int main(int argc, char *argv[]) {
     int repeat = 0;
     long udelay = 5000;
-    SharedCounters save;
+    HeaderObject save = {0};
+    int unlink = 0;
+    int force_open = 1;
+    int release_lock = 0;
 
     puts("--------");
-    connect_shm_semlock_counters();
+    connect_shm_semlock_counters(unlink, force_open, release_lock);
     puts("+++++++++");
     if (argc > 1) {
         sscanf(argv[1], "%d", &repeat);
@@ -78,11 +86,11 @@ int main(int argc, char *argv[]) {
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
         memset(&save, '\0', sizeof(save));
         do {
-            if (memcmp(&save, shm_semlock_counters.counters, sizeof(save)) ) {
+            if (memcmp(&save, shm_semlock_counters.header, sizeof(save)) ) {
                 time_t timestamp = time( NULL );
                 puts(ctime(&timestamp));
                 dump_shm_semlock_counters();
-                memcpy(&save, shm_semlock_counters.counters, sizeof(save));
+                memcpy(&save, shm_semlock_counters.header, sizeof(save));
                 puts("==========");
             }
             usleep(udelay);

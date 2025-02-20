@@ -311,12 +311,20 @@ sem_timedwait_save(sem_t *sem, struct timespec *deadline, PyThreadState *_save)
 cf: https://github.com/python/cpython/issues/125828
 
 On MacOSX, `sem_getvalue` is not implemented. This workaround proposes to handle
-the internal value Semaphore ((R)Lock are out of scope) in a shared memory available for each processed.
+the internal value Semaphore ((R)Lock are out of scope) in a shared memory
+available for each processed.
+
 This internal value is stored in a structure named CounterObject with:
-+ the semaphore name,
++ the referenced semaphore name,
 + the (internal) current value,
-+ a number of attached processes.
 + a flag to reset counter when dealloc.
++ a created timestamp.
+
+A header is
++ the count of semaphore stored.
++ the count of available slots.
++ the size of shared memory.
++ a count of attached processes.
 
 With each Semaphore (SemLock) a mutex is created in order to protect data race and
 a reference to the CounterObject is updated.
@@ -324,7 +332,7 @@ a reference to the CounterObject is updated.
 When impl/rebuid functions are called, CounterObject is associated to the Semaphore.
 When acquire/release functions are called, this internal value is updated.
 When getvalue function is called, the internal value is returned.
-When dealloc fonction is called, CounterObject is updated and could be reset.
+When dealloc fonction is called, CounterObject is reset.
 When unlink is called, Semaphore and its mutex are unlink.
 
 A global lock is also created to handle shared memory when the workaround needs
@@ -332,20 +340,20 @@ a new counter, when counter is no more used or when an extension of shared memor
 
 1 -> Structure of shared memory:
 
-                   ---- Extendable array of 'max_counters' Counters ---
+                   --------- Extendable array of 'N' Counters ---------
                  /                                                      \
-+----------------+----------------+---/  /---+-------------+-------------+
-|  Header        |    Counter 1   |          | Counter N-1 |  Counter N  |
-|----------------|----------------|   ....   |-------------|-------------|
-|                |                |          |             |             |
-|  nb_semlocks   | sem_name       |          |             |             |
-|  max_semlocks  | internal_value |          |             |             |
-|  size_shm      | n_procs        |          |             |             |
-|                | reset_counter  |          |             |             |
-+----------------+----------------+---/  /---+-------------+-------------+
-max_counters is evaluate from PAGESIZE and sizeof(CouterObject)
++-----------------+----------------+---/  /---+-------------+-------------+
+|  Header         |    Counter 1   |          | Counter N-1 |  Counter N  |
+|-----------------|----------------|   ....   |-------------|-------------|
+|                 |                |          |             |             |
+|  n_semlocks     | sem_name       |          |             |             |
+|  n_semlocks     | internal_value |          |             |             |
+|  size_shm       | reset_counter  |          |             |             |
+|  n_procs        | ctimestamp     |          |             |             |
++-----------------+----------------+---/  /---+-------------+-------------+
 */
 // ------------- list of structures --------------
+
 #include "semaphore_macosx.h"
 
 /*
@@ -358,18 +366,14 @@ static CountersWorkaround shm_semlock_counters = {
     .create_shm = 0,
     .name_gmlock = "/mp_gh125828",
     .handle_gmlock = (SEM_HANDLE)0,
-    .counters = (SharedCounters *)NULL,
+    .header = (HeaderObject *)NULL,
+    .counters = (CounterObject *)NULL
 };
 
 /*
-page size in bytes from sysconf(_SC_PAGESIZE);
-*/
-static long sc_page_size;
-
-/*
 SemLockObject with aditionnal members:
-+ Semaphore as mutex
-+ Pointer to CounterObject
++ semaphore as mutex to protect access to associated CounterObject.
++ pointer to CounterObject.
 */
 typedef struct {
     PyObject_HEAD
@@ -401,8 +405,9 @@ void delete_shm_semlock_counters(void) {
             if (ACQUIRE_GENERAL_LOCK) {
                 // unmmap
                 munmap(shm_semlock_counters.counters,
-                       shm_semlock_counters.counters->header.size_shm);
+                       shm_semlock_counters.header->size_shm);
 
+                --(shm_semlock_counters.header->n_procs);
                 /*
                 Close shared mem
                 When shm_unlink(shm_semlock_counters.name_shm) is always called,
@@ -411,9 +416,11 @@ void delete_shm_semlock_counters(void) {
 
                 I don't figure out why.
                 */
-                if (shm_semlock_counters.handle_shm && shm_semlock_counters.create_shm) {
+                if (shm_semlock_counters.handle_shm && !shm_semlock_counters.header->n_procs) {
+                    STR_SEMAPHORE_LOG("\tdelete_mem", "shm_unlink");
+                    shm_unlink(shm_semlock_counters.name_shm);
+                } else {
                     STR_SEMAPHORE_LOG("\tdelete_mem", "Not shm_unlink");
-                    //shm_unlink(shm_semlock_counters.name_shm);
                 }
                 shm_semlock_counters.state_this = THIS_CLOSED;
 
@@ -427,14 +434,18 @@ void delete_shm_semlock_counters(void) {
         }
     }
 }
-#include <unistd.h>
+
 void create_shm_semlock_counters(const char *from_sem_name) {
     int oflag = O_RDWR;
     int shm = -1;
     int res = -1;
     SEM_HANDLE sem = SEM_FAILED;
-    long size_shm = sysconf(_SC_PAGESIZE);
-    sc_page_size = size_shm;
+    char *datas = NULL;
+    HeaderObject *header = NULL;
+    long size_shm = CALC_SIZE_SHM;
+
+    // Calculate a new size as a multiple of SC_PAGESIZE
+    size_shm = ALIGN_SHM_PAGE(size_shm);
 
     // already done
     if (shm_semlock_counters.state_this != THIS_NOT_OPEN) {
@@ -458,89 +469,62 @@ void create_shm_semlock_counters(const char *from_sem_name) {
             if (shm == -1) {
                 oflag |= O_CREAT;
                 shm = shm_open(shm_semlock_counters.name_shm, oflag, S_IRUSR | S_IWUSR);
-                // set size.
+                // Set size.
                 res = ftruncate(shm, size_shm);
                 shm_semlock_counters.create_shm = 1;
             }
             // mmap
             if (res >= 0) {
                 shm_semlock_counters.handle_shm = shm;
-                shm_semlock_counters.counters = (SharedCounters *)mmap(NULL,
-                                                          size_shm,
-                                                          (PROT_WRITE | PROT_READ),
-                                                          (MAP_SHARED),
-                                                          shm_semlock_counters.handle_shm,
-                                                          0L);
-                // When mmp is just created, initialize all members.
-                if (shm_semlock_counters.counters != MAP_FAILED && (oflag & O_CREAT)) {
-                    shm_semlock_counters.counters->header.size_shm = size_shm;
-                    /* first ocurence of array is the header */
-                    shm_semlock_counters.counters->header.max_slots =
-                                        (int)(size_shm/sizeof(CounterObject)) - 1;
-                    shm_semlock_counters.counters->header.nb_semlocks = 0;
+                datas = (char *)mmap(NULL,
+                                     size_shm,
+                                     (PROT_WRITE | PROT_READ),
+                                     (MAP_SHARED),
+                                     shm_semlock_counters.handle_shm,
+                                     0L);
+                if (datas != MAP_FAILED) {
+                    shm_semlock_counters.header = (HeaderObject *)datas;
+                    shm_semlock_counters.counters = (CounterObject *)(datas+sizeof(HeaderObject));
+                    header = shm_semlock_counters.header;
+                    // When mmap is just created, initialize all members.
+                    if (oflag & O_CREAT) {
+                        header->size_shm = size_shm;
+                        header->n_slots = CALC_NB_SLOTS(size_shm);
+                        header->n_semlocks = 0;
+                        header->n_procs = 0;
+                    }
+                    ++header->n_procs;
+
+                    // Initialization is successful.
+                    shm_semlock_counters.state_this = THIS_AVAILABLE;
+                    atexit(delete_shm_semlock_counters);
                 }
-                // Initialization is successful.
-                shm_semlock_counters.state_this = THIS_AVAILABLE;
-                atexit(delete_shm_semlock_counters);
             }
         }
         RELEASE_GENERAL_LOCK;
     }
 }
 
-static int _extend_shm_semlock_counters(void) {
-    // The global lock must be LOCKED.
-    HeaderObject *header = &shm_semlock_counters.counters->header;
-    size_t size = header->size_shm + sc_page_size;
-    CounterObject *new = NULL;
-    errno = 0;
-
-    if (shm_semlock_counters.state_this != THIS_AVAILABLE) {
-        return -1;
-    }
-
-    printf("shm: %d, counters:%p\n", shm_semlock_counters.handle_shm, shm_semlock_counters.counters);
-    printf("nb sems:%d - nb sem slots:%d, size_shm:%d\n", header->nb_semlocks,
-                                                          header->max_slots,
-                                                          header->size_shm);
-
-    new = (CounterObject *)mmap(shm_semlock_counters.counters,
-                                (size_t)(size),
-                                (PROT_WRITE | PROT_READ),
-                                (MAP_SHARED | MAP_FIXED),
-                                shm_semlock_counters.handle_shm,
-                                0);
-    if (new != NULL && new != (CounterObject *)-1) {
-        header->size_shm += size;
-        header->max_slots = (int)(header->size_shm / sizeof(CounterObject))-1;
-        //shm_semlock_counters.counters = new;
-        return 0;
-    }
-    printf("new: %p -> errno:%d\n", new, errno);
-    PyErr_SetFromErrno(PyExc_OSError);
-    return -1;
-}
-
 /*
 Build name of mutex associated with each Semaphore.
 From python SemLock class, name is unique.
-*/
 static char *gh_name = "_gh125828";
 static char *_build_sem_name(char *buf, const char *name) {
     strcpy(buf, name);
     strcat(buf, gh_name);
     return buf;
 }
+*/
 
 /*
 Search if semaphore name is already store in a counter of the shared memory.
 */
 static CounterObject* _search_counter_from_sem_name(const char *sem_name) {
     int i = 0, j = 0;
-    HeaderObject *header = &shm_semlock_counters.counters->header;
-    CounterObject *counter = shm_semlock_counters.counters->array_counters;
+    HeaderObject *header = shm_semlock_counters.header;
+    CounterObject *counter = shm_semlock_counters.counters;
 
-    while(i < header->max_slots && j < header->nb_semlocks) {
+    while(i < header->n_slots && j < header->n_semlocks) {
         if(PyOS_stricmp(counter->sem_name, sem_name) == 0) {
             return counter;
         }
@@ -558,70 +542,24 @@ Search for a free slot to store data for a new counter.
 */
 static CounterObject* _search_counter_free_slot(void) {
     int i = 0;
-    HeaderObject *header = &shm_semlock_counters.counters->header;
-    CounterObject *counter = shm_semlock_counters.counters->array_counters;
+    HeaderObject *header = shm_semlock_counters.header;
+    CounterObject *counter = shm_semlock_counters.counters;
 
-    while (i < header->max_slots) {
+    while (i < header->n_slots) {
         if(counter->sem_name[0] == 0) {
-            return counter;
-        }
-        ++counter;
-        ++i;
-    }
-    /* extend shared memory */
-    errno = 0;
-    if (_extend_shm_semlock_counters() < 0) {
-        return NULL;
-    }
-
-    while (i < header->max_slots) {
-        if(counter->sem_name[0] == 0) {
+            /* Mark as reserved */
+            counter->sem_name[0] = 'X';
             return counter;
         }
         ++counter;
         ++i;
     }
 
+    /*
+    Not enough memory: see sysconf(_SC_SEM_NSEMS_MAX)
+    */
     return (CounterObject *)NULL;
 }
-
-/*
-Connect to an existing counter.
-or
-Create a new counter.
-
-static CounterObject *_link_counter(SemLockObject *self, const char *name,
-                                    int value, int reset_counter) {
-    CounterObject *counter = NULL;
-    HeaderObject *header =  &shm_semlock_counters.counters->header;
-
-    // Does Semaphore exist in shared memory ?
-    counter = _search_counter_from_sem_name(name);
-    if (counter) {
-        // Update counter.
-        ++counter->n_procs;
-        STR_SEMAPHORE_LOG("Link_connect", counter->sem_name);
-    } else {
-        // Find an available slot.
-        counter = _search_counter_free_slot();
-        if (counter == NULL) {
-            PyErr_SetString(PyExc_MemoryError, "Can't allocate more "
-                            "shared memory for workaround");
-            return NULL;
-        }
-        // Create/copy a new counter.
-        strcpy(counter->sem_name, name);
-        counter->n_procs = 1;
-        counter->internal_value = value;
-        counter->reset_counter = reset_counter;
-
-        // Update header.
-        ++header->nb_semlocks;
-        STR_SEMAPHORE_LOG("Link_create", counter->sem_name);
-    }
-    return counter;
-}
-*/
 
 /*
 Connect a Semaphore with an existing counter, from `SemLock__rebuild.
@@ -636,13 +574,11 @@ static CounterObject *connect_counter(SemLockObject *self, const char *name) {
     if (ACQUIRE_GENERAL_LOCK) {
         counter = _search_counter_from_sem_name(name);
         if (counter) {
-            // Update counter.
-            ++counter->n_procs;
+            // Find counter.
             STR_SEMAPHORE_LOG("Link_connect", counter->sem_name);
             return counter;
         } else {
-            PyErr_SetString(PyExc_ValueError, "Can't find reference to this Semaphore"
-                            "shared memory for workaround");
+            PyErr_SetString(PyExc_ValueError, "Can't find reference to this Semaphore");
         }
         errno = 0;
         if (!RELEASE_GENERAL_LOCK || !counter) {
@@ -664,6 +600,7 @@ static CounterObject *new_counter(SemLockObject *self, const char *name,
     if (shm_semlock_counters.state_this == THIS_NOT_OPEN) {
         create_shm_semlock_counters(name);
     }
+
     errno = 0;
     if (ACQUIRE_GENERAL_LOCK) {
         counter = _search_counter_free_slot();
@@ -674,12 +611,12 @@ static CounterObject *new_counter(SemLockObject *self, const char *name,
         }
         // Create/copy a new counter.
         strcpy(counter->sem_name, name);
-        counter->n_procs = 1;
         counter->internal_value = value;
         counter->reset_counter = reset_counter;
+        counter->ctimestamp = time(NULL);
 
         // Update header.
-        ++shm_semlock_counters.counters->header.nb_semlocks;
+        ++shm_semlock_counters.header->n_semlocks;
         STR_SEMAPHORE_LOG("Link_create", counter->sem_name);
 
         errno = 0;
@@ -697,59 +634,29 @@ Checks if counter must be remove from shared memory.
 */
 static void dealloc_counter(SemLockObject *self) {
     CounterObject *counter = self->counter;
-    HeaderObject *header = &shm_semlock_counters.counters->header;
 
-    errno = 0;
-    if (counter) {
-        // Acquire the semaphore mutex
-        if (ACQUIRE_COUNTER_MUTEX(self)) {
-            counter = self->counter;
-            --counter->n_procs;
-            // reset counter members and update header
-            if (counter->reset_counter) {
-                errno = 0;
-                if (ACQUIRE_GENERAL_LOCK) {
-                    // Reset counter.
-                    SEMAPHORE_LOG("\tdel_share", self);
-                    memset(counter, 0, sizeof(CounterObject));
-                    self->counter = NULL;
+    if (counter && counter->reset_counter) {
+        errno = 0;
+        if (ACQUIRE_GENERAL_LOCK) {
+            /*
+            Reset counter members and update header.
+            */
+            SEMAPHORE_LOG("\tdel_share", self);
+            // Reset counter.
+            memset(counter, 0, sizeof(CounterObject));
+            // Update semlock str
+            self->counter = NULL;
 
-                    // Update header.
-                    --header->nb_semlocks;
-                    errno = 0;
-                    if (!RELEASE_GENERAL_LOCK) {
-                        PyErr_SetFromErrno(PyExc_OSError);
-                    }
-                } else {
-                    PyErr_SetFromErrno(PyExc_OSError);
-                }
-            }
-            if (!RELEASE_COUNTER_MUTEX(self)) {
+            // Update header.
+            --(shm_semlock_counters.header->n_semlocks);
+            errno = 0;
+            if (!RELEASE_GENERAL_LOCK) {
                 PyErr_SetFromErrno(PyExc_OSError);
             }
         } else {
             PyErr_SetFromErrno(PyExc_OSError);
         }
     }
-}
-
-/*
-Return internal value of counter.
-*/
-static int on_get_counter_value(SemLockObject *self) {
-    int value = -1;
-
-    // acquire counter lock
-    errno = 0;
-    if (ACQUIRE_COUNTER_MUTEX(self)) {
-        value = self->counter->internal_value;
-        if (!RELEASE_COUNTER_MUTEX(self)) {
-            PyErr_SetFromErrno(PyExc_OSError);
-        }
-    } else {
-        PyErr_SetFromErrno(PyExc_OSError);
-    }
-    return value;
 }
 
 #endif /* HAVE_BROKEN_SEM_GETVALUE */
@@ -836,16 +743,8 @@ _multiprocessing_SemLock_acquire_impl(SemLockObject *self, int blocking,
     }
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (ISSEMAPHORE(self)) {
-        if (ACQUIRE_COUNTER_MUTEX(self)) {
-            --self->counter->internal_value;
-            if (!RELEASE_COUNTER_MUTEX(self)) {
-                PyErr_SetFromErrno(PyExc_OSError);
-                return NULL;
-            }
-        } else {
-            PyErr_SetFromErrno(PyExc_OSError);
-            return NULL;
-        }
+        /* here we are in a critical section */
+        --self->counter->internal_value;
     }
 #endif
 
@@ -905,20 +804,9 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
             }
         } else {
             if (ISSEMAPHORE(self)) {
-                int val = -1;
-                if (ACQUIRE_COUNTER_MUTEX(self)) {
-                    val = self->counter->internal_value;
-                    if (!RELEASE_COUNTER_MUTEX(self)) {
-                        PyErr_SetFromErrno(PyExc_OSError);
-                        return NULL;
-                    }
-                    if ( val >= self->maxvalue) {
-                        PyErr_SetString(PyExc_ValueError, "semaphore or lock "
-                                "released too many times");
-                        return NULL;
-                    }
-                } else {
-                    PyErr_SetFromErrno(PyExc_OSError);
+                if ( self->counter->internal_value >= self->maxvalue) {
+                    PyErr_SetString(PyExc_ValueError, "semaphore or lock "
+                            "released too many times");
                     return NULL;
                 }
             }
@@ -942,16 +830,8 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (ISSEMAPHORE(self)) {
-        if (ACQUIRE_COUNTER_MUTEX(self)) {
-            ++self->counter->internal_value;
-            if (!RELEASE_COUNTER_MUTEX(self)) {
-                PyErr_SetFromErrno(PyExc_OSError);
-                return NULL;
-            }
-        } else {
-            PyErr_SetFromErrno(PyExc_OSError);
-            return NULL;
-        }
+        /* here we are in a critical section */
+        ++self->counter->internal_value;
     }
 #endif
 
@@ -979,7 +859,6 @@ newsemlockobject(PyTypeObject *type, SEM_HANDLE handle, int kind, int maxvalue,
     self->maxvalue = maxvalue;
     self->name = name;
 #ifdef HAVE_BROKEN_SEM_GETVALUE
-    self->handle_mutex = (SEM_HANDLE)0;
     self->counter = NULL;
 #endif
     return (PyObject*)self;
@@ -1009,11 +888,6 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
     SEM_HANDLE handle = SEM_FAILED;
     PyObject *result;
     char *name_copy = NULL;
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-    char mutex_name[36];
-    SemLockObject *semlock = NULL;
-    SEM_HANDLE handle_mutex = SEM_FAILED;
-#endif
 
     if (kind != RECURSIVE_MUTEX && kind != SEMAPHORE) {
         PyErr_SetString(PyExc_ValueError, "unrecognized kind");
@@ -1035,24 +909,14 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
     if (unlink && SEM_UNLINK(name) < 0)
         goto failure;
 
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-    if (ISSEMAPHORE2(maxvalue, kind)) {
-        _build_sem_name(mutex_name, name);
-        handle_mutex = SEM_CREATE(mutex_name, 1, 1);
-        if (handle_mutex == SEM_FAILED)
-            goto failure;
-        if (unlink && SEM_UNLINK(mutex_name) < 0)
-            goto failure;
-    }
-#endif
     result = newsemlockobject(type, handle, kind, maxvalue, name_copy);
     if (!result)
         goto failure;
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
-    semlock = _SemLockObject_CAST(result);
+    SemLockObject *semlock = _SemLockObject_CAST(result);
+
     if (ISSEMAPHORE2(maxvalue, kind)) {
-        semlock->handle_mutex = handle_mutex;
         semlock->counter = new_counter(semlock, name, value, unlink);
         if (!semlock->counter) {
             PyObject_GC_UnTrack(semlock);
@@ -1071,13 +935,7 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
     }
     if (handle != SEM_FAILED)
         SEM_CLOSE(handle);
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-    if (ISSEMAPHORE2(maxvalue, kind)) {
-        if (handle_mutex != SEM_FAILED) {
-            SEM_CLOSE(handle_mutex);
-        }
-    }
-#endif
+
     PyMem_Free(name_copy);
     return NULL;
 }
@@ -1106,11 +964,6 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
 
     PyObject *result = NULL;
     char *name_copy = NULL;
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-    char mutex_name[36];
-    SemLockObject *semlock = NULL;
-    SEM_HANDLE handle_mutex = SEM_FAILED;
-#endif
 
     if (name != NULL) {
         name_copy = PyMem_Malloc(strlen(name) + 1);
@@ -1127,28 +980,14 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
             PyMem_Free(name_copy);
             return NULL;
         }
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-        if (ISSEMAPHORE2(maxvalue, kind)) {
-            _build_sem_name(mutex_name, name);
-            handle_mutex = sem_open(mutex_name, 0);
-            if (handle_mutex == SEM_FAILED) {
-                if (handle != SEM_FAILED) {
-                    SEM_CLOSE(handle);
-                }
-                PyErr_SetFromErrno(PyExc_OSError);
-                PyMem_Free(name_copy);
-                return NULL;
-            }
-        }
-#endif
     }
 #endif
     result = newsemlockobject(type, handle, kind, maxvalue, name_copy);
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
-    semlock = _SemLockObject_CAST(result);
+    SemLockObject *semlock = _SemLockObject_CAST(result);
+
     if (ISSEMAPHORE(semlock)) {
-        semlock->handle_mutex = handle_mutex;
         semlock->counter = connect_counter(semlock, name);
         if (!semlock->counter) {
             PyObject_GC_UnTrack(semlock);
@@ -1179,9 +1018,6 @@ semlock_dealloc(SemLockObject* self)
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (ISSEMAPHORE(self)) {
         dealloc_counter(self);
-        if (self->handle_mutex != SEM_FAILED) {
-            SEM_CLOSE(self->handle_mutex);
-        }
     }
 #endif
     if (self->name) {
@@ -1238,7 +1074,7 @@ _multiprocessing_SemLock__get_value_impl(SemLockObject *self)
         return PyLong_FromLong((long)Py_IsFalse(_multiprocessing_SemLock__is_zero_impl(self)));
     }
     // Semaphore with maxvalue > 1
-    sval = on_get_counter_value(self);
+    sval = self->counter->internal_value;
     if (sval < 0) {
         sval = 0;
     }
@@ -1412,20 +1248,16 @@ _PyMp_sem_unlink(const char *name)
         return NULL;
     }
 #ifdef HAVE_BROKEN_SEM_GETVALUE
-    char mutex_name[36];
     CounterObject *counter = NULL;
-    /* It is impossible to know if we are in
-    case of a semaphore. So try find it in shared mem.
-    */
+
     if (ACQUIRE_GENERAL_LOCK) {
-        _build_sem_name(mutex_name, name);
+        // _build_sem_name(mutex_name, name);
         counter = _search_counter_from_sem_name(name);
-        if (counter) {
-            STR_SEMAPHORE_LOG("\t\tunlink", name);
-            counter->reset_counter = 1;
-            SEM_UNLINK(mutex_name);
-        }
         RELEASE_GENERAL_LOCK;
+    }
+    if (counter) {
+        STR_SEMAPHORE_LOG("\t\tunlink", name);
+        counter->reset_counter = 1;
     }
 #endif
 

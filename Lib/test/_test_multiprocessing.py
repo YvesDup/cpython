@@ -4958,22 +4958,28 @@ class _TestLogging(BaseTestCase):
 #         logger.warn('foo')
 #         assert self.__handled
 
-class _TestMacOSXSemaphoreExpand(BaseTestCase):
+@unittest.skipIf(sys.platform != "darwin", "MacOSX only")
+class _TestMacOSXSemaphore(BaseTestCase):
 
     ALLOWED_TYPES = ('processes',)
-    @unittest.skipIf(sys.platform != "darwin", "MacOSX only")
-    def test_extend_shd_(self):
-        # see macro MAX_SEMCOUNTERS
-        # in file ./Modules/_multiprocessing/semaphore_macosx.h.
-        # Creates 150 semaphores in order to expand shared memory.
-        try:
-            n = 150
-            s = [self.BoundedSemaphore(i) for i in range(1,n)]
-            self.assertEqual(s[-1].get_value(), n-1)
-            with self.assertRaises(ValueError):
-                s[0].release()
-        except:
-            pass
+    def test_no_left_space_on_device(self):
+        # self.assertTrue(True)
+        """"""
+        with self.assertRaisesRegex(OSError, 'Errno 28'):
+            s = []
+            n = os.sysconf("SC_SEM_NSEMS_MAX")
+            # n = 8000
+            try:
+                for i in range(n):
+                    if i % 2 == 0:
+                        s.append(self.BoundedSemaphore(888))
+                    else:
+                        s.append(self.Semaphore(222))
+            except:
+                print(f'Stopped at {len(s)}/{n} Semaphores',flush=True, file=sys.stderr)
+                raise
+        time.sleep(0.5)
+        """"""
 
 #
 # Check that Process.join() retries if os.waitpid() fails with EINTR
