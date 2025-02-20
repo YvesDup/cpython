@@ -488,12 +488,20 @@ _multiprocessing.SemLock.__new__
     unlink: bool
 
 [clinic start generated code]*/
+static FILE *fp = 0 ;
 
 static PyObject *
 _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
                               int maxvalue, const char *name, int unlink)
 /*[clinic end generated code: output=30727e38f5f7577a input=fdaeb69814471c5b]*/
 {
+/*
+if (fp == NULL) {
+    char buf[128];
+    sprintf(buf, "/Users/Yves/Documents/trace-%lu.txt", time(NULL));
+    fp =  fopen(buf, "w+");
+}
+*/
     SEM_HANDLE handle = SEM_FAILED;
     PyObject *result;
     char *name_copy = NULL;
@@ -523,7 +531,12 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
     result = newsemlockobject(type, handle, kind, maxvalue, name_copy);
     if (!result)
         goto failure;
-
+/*
+if (unlink)
+    fprintf(fp, "new %p\n", result);
+else
+    fprintf(fp, "new %s\n", name);
+*/
     return result;
 
   failure:
@@ -581,6 +594,12 @@ static void
 semlock_dealloc(PyObject *op)
 {
     SemLockObject *self = _SemLockObject_CAST(op);
+/*
+if (self->name)
+    fprintf(fp, "del %s\n", self->name);
+else
+    fprintf(fp, "unl %p\ndel %p\n", self, self);
+*/
     PyTypeObject *tp = Py_TYPE(self);
     PyObject_GC_UnTrack(self);
     if (self->handle != SEM_FAILED)
@@ -794,6 +813,9 @@ PyType_Spec _PyMp_SemLockType_spec = {
 PyObject *
 _PyMp_sem_unlink(const char *name)
 {
+/*
+fprintf(fp, "unl %s\n", name);
+*/
     if (SEM_UNLINK(name) < 0) {
         _PyMp_SetError(NULL, MP_STANDARD_ERROR);
         return NULL;

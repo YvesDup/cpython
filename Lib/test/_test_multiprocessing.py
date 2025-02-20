@@ -5015,6 +5015,35 @@ class _TestLogging(BaseTestCase):
             handler.close()
 
 
+@unittest.skipIf(sys.platform != "darwin", "MacOSX only")
+class _TestMacOSXSemaphore(BaseTestCase):
+
+    ALLOWED_TYPES = ('processes',)
+    def test_no_left_space_on_device(self):
+        # self.assertTrue(True)
+        """"""
+        s = []
+        with self.assertRaisesRegex(OSError, 'Errno 28'):
+            n = os.sysconf("SC_SEM_NSEMS_MAX")
+            # n = 8000
+            try:
+                for i in range(n):
+                    if i % 2 == 0:
+                        s.append(self.BoundedSemaphore(888))
+                    else:
+                        s.append(self.Semaphore(222))
+            except:
+                print(f'Stopped at {len(s)}/{n} Semaphores',flush=True, file=sys.stderr)
+                raise
+        time.sleep(0.5)
+        try:
+            while True:
+                item = s.pop()
+                del item
+        except:
+            pass
+        """"""
+
 # class _TestLoggingProcessName(BaseTestCase):
 #
 #     def handle(self, record):
