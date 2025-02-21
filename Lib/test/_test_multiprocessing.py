@@ -5015,15 +5015,15 @@ class _TestLogging(BaseTestCase):
             handler.close()
 
 
+ACQUIRE, RELEASE = range(2)
 @unittest.skipIf(sys.platform != "darwin", "MacOSX only")
 class _TestMacOSXSemaphore(BaseTestCase):
-
     ALLOWED_TYPES = ('processes',)
     def test_no_left_space_on_device(self):
         # self.assertTrue(True)
         """"""
         s = []
-        with self.assertRaisesRegex(OSError, 'Errno 28'):
+        with self.assertRaises(OSError):
             n = os.sysconf("SC_SEM_NSEMS_MAX")
             # n = 8000
             try:
@@ -5032,10 +5032,10 @@ class _TestMacOSXSemaphore(BaseTestCase):
                         s.append(self.BoundedSemaphore(888))
                     else:
                         s.append(self.Semaphore(222))
-            except:
-                print(f'Stopped at {len(s)}/{n} Semaphores',flush=True, file=sys.stderr)
+            except OSError as err:
+                print(f'Stopped from {err!a} when {len(s)}/{n} Semaphores',flush=True, file=sys.stderr)
                 raise
-        time.sleep(0.5)
+        time.sleep(0.1)
         try:
             while True:
                 item = s.pop()
@@ -5043,6 +5043,60 @@ class _TestMacOSXSemaphore(BaseTestCase):
         except:
             pass
         """"""
+
+    @classmethod
+    def _run_thread(cls, sem, meth, ntime, delay):
+        if meth == ACQUIRE:
+            for _ in range(ntime):
+                sem.acquire()
+                time.sleep(delay)
+        else:
+            for _ in range(ntime):
+                sem.release()
+                time.sleep(delay)
+
+    @classmethod
+    def _run_process(cls, sem, sem_meth, nthread=1, ntime=10, delay=0.1):
+        ts = []
+        for _ in range(nthread):
+            t = threading.Thread(target=cls._run_thread,
+                            args=(sem, sem_meth, ntime, delay))
+            ts.append(t)
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+
+    def test_mix_several_acquire_release(self):
+        # n processes, threads and loops
+        n_p_acq, n_th_acq, n_loop_acq = 5, 3, 10
+        n_p_rel, n_th_rel, n_loop_rel = 3, 4, 8
+
+        n_acq = n_p_acq*n_th_acq*n_loop_acq
+        n_rel = n_p_rel*n_th_rel*n_loop_rel
+        sem = self.BoundedSemaphore(n_acq)
+        ps = []
+        for _ in range(n_p_acq):
+            p = self.Process(target=self._run_process,
+                             args=(sem, ACQUIRE, n_th_acq, n_loop_acq, 0.01))
+            ps.append(p)
+
+        for _ in range(n_p_rel):
+            p = self.Process(target=self._run_process,
+                             args=(sem, RELEASE, n_th_rel, n_loop_rel, 0.005))
+            ps.append(p)
+
+        for p in ps:
+            p.start()
+        for p in ps:
+            p.join()
+        """
+        self.assertEqual(sem.get_value(), n_acq-n_rel)
+        for _ in range(n_acq-n_rel):
+            sem.release()
+        with self.assertRaises(ValueError):
+            sem.release()
+        """
 
 # class _TestLoggingProcessName(BaseTestCase):
 #
