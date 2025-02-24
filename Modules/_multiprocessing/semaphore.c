@@ -1051,12 +1051,6 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
             PyMem_Free(name_copy);
             return NULL;
         }
-        handle_mutex = sem_open(name, 0);
-        if (handle == SEM_FAILED) {
-            PyErr_SetFromErrno(PyExc_OSError);
-            PyMem_Free(name_copy);
-            return NULL;
-        }
 #ifdef HAVE_BROKEN_SEM_GETVALUE
         if (ISSEMAPHORE2(maxvalue, kind)) {
             _build_sem_name(mutex_name, name);
