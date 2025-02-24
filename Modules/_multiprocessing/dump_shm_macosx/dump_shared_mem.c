@@ -8,6 +8,9 @@ typedef sem_t *SEM_HANDLE;
 
 #define MAX_SHOW_LOCKS  32
 
+int acquire_lock(SEM_HANDLE sem);
+int release_lock(SEM_HANDLE sem);
+
 #include "../semaphore_macosx.h"
 #include "shared_mem.h"
 
@@ -65,7 +68,7 @@ int main(int argc, char *argv[]) {
     HeaderObject save = {0};
     int unlink = 0;
     int force_open = 1;
-    int release_lock = 0;
+    int release_lock = 1;
 
     puts("--------");
     connect_shm_semlock_counters(unlink, force_open, release_lock);

@@ -15,7 +15,15 @@ void sigterm(int code) {
     exit(EXIT_SUCCESS);
 }
 
-void connect_shm_semlock_counters(int unlink, int force_open, int release_lock) {
+int acquire_lock(SEM_HANDLE sem) {
+    return 1;
+}
+
+int release_lock(SEM_HANDLE sem) {
+    return 1;
+}
+
+void connect_shm_semlock_counters(int unlink, int force_open, int call_release_lock) {
 puts(__func__);
 
     int oflag = O_RDWR;
@@ -44,7 +52,7 @@ puts(__func__);
     printf("sem:%p\n", sem);
     shm_semlock_counters.handle_gmlock = sem;
 
-    if (release_lock) {
+    if (call_release_lock) {
         RELEASE_GENERAL_LOCK;
     }
 

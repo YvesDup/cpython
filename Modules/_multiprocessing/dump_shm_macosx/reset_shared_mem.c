@@ -5,6 +5,9 @@
 #include <semaphore.h>
 typedef sem_t *SEM_HANDLE;
 
+int acquire_lock(SEM_HANDLE sem);
+int release_lock(SEM_HANDLE sem);
+
 #include "../semaphore_macosx.h"
 #include "shared_mem.h"
 
@@ -46,6 +49,7 @@ puts(__func__);
             }
             header->n_semlocks = 0;
             header->n_slots = CALC_NB_SLOTS(header->size_shm);
+            header->n_procs = 0;
             dump_shm_semlock_header();
             RELEASE_GENERAL_LOCK;
         }

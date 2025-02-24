@@ -71,7 +71,7 @@ class SemLock(object):
                 obj._semlock._after_fork()
             util.register_after_fork(self, _after_fork)
 
-        if not unlink_now and self._semlock.name is not None:
+        if self._semlock.name is not None:
             # We only get here if we are on Unix with forking
             # disabled.  When the object is garbage collected or the
             # process shuts down we unlink the semaphore name

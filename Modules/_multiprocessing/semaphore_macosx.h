@@ -5,12 +5,6 @@
 #include <sys/mman.h>   // shm_open, shm_unlink
 #include <assert.h>     // assert
 
-#define ACQUIRE_GENERAL_LOCK    (sem_wait(shm_semlock_counters.handle_gmlock) >= 0)
-#define RELEASE_GENERAL_LOCK    (sem_post(shm_semlock_counters.handle_gmlock) >= 0)
-
-#define ACQUIRE_COUNTER_MUTEX(s) 1 //(sem_wait((s)->handle_mutex) >= 0)
-#define RELEASE_COUNTER_MUTEX(s) 1 //(sem_post((s)->handle_mutex) >= 0)
-
 #define SC_PAGESIZE             sysconf(_SC_PAGESIZE)
 
 #define CALC_NB_SLOTS(size)     (int)(((size) - sizeof(HeaderObject)) / sizeof(CounterObject))
@@ -42,7 +36,7 @@ typedef int MEMORY_HANDLE;
 enum _state {THIS_NOT_OPEN, THIS_AVAILABLE, THIS_CLOSED};
 
 typedef struct {
-    /*-- static datas --*/
+    /*-- global datas --*/
     int state_this;           // State of this structure.
     char *name_shm;
     MEMORY_HANDLE handle_shm; // Memory handle.
@@ -53,6 +47,14 @@ typedef struct {
     HeaderObject *header;     // Pointer to header (shared memory).
     CounterObject*counters;   // Pointer to first item of fix array (shared memory).
 }  CountersWorkaround;
+
+#define SHOW_WHERE(m)   (printf("%s %d\t", m, __LINE__))
+
+#define ACQUIRE_GENERAL_LOCK    (/*SHOW_WHERE("Acquire") &&*/ acquire_lock(shm_semlock_counters.handle_gmlock) >= 0)
+#define RELEASE_GENERAL_LOCK    (/*SHOW_WHERE("Release") &&*/ release_lock(shm_semlock_counters.handle_gmlock) >= 0)
+
+#define ACQUIRE_COUNTER_MUTEX(s) (acquire_lock((s)) >= 0)
+#define RELEASE_COUNTER_MUTEX(s) (release_lock((s)) >= 0)
 
 #define ISSEMAPHORE2(m, k) (m > 1 && k == SEMAPHORE)
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
