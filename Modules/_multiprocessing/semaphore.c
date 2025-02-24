@@ -399,7 +399,7 @@ Lock operations.
 */
 
 /*
-Release a mutex 
+Release a mutex
 */
 int release_lock(SEM_HANDLE handle) {
     int res = sem_post(handle);
