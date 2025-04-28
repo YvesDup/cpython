@@ -765,6 +765,13 @@ class ApplyResult(object):
         self._event.wait(timeout)
 
     def get(self, timeout=None):
+        # See gh-126743: while the Pool reference of this object is not None,
+        # object is still running. But The Pool could be terminate or close before
+        # the 'object run' is completed.
+        if self._pool is not None and self._pool._state in (TERMINATE, CLOSE):
+            raise RuntimeError("Pool is terminated or close, ",
+                               "result is unknow")
+
         self.wait(timeout)
         if not self.ready():
             raise TimeoutError

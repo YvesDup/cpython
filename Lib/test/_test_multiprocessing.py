@@ -3149,6 +3149,28 @@ class _TestPool(BaseTestCase):
             pool = None
             support.gc_collect()
 
+    def test_get_result_when_pool_is_terminated(self):
+        if self.TYPE == 'threads':
+            self.skipTest(f"test not applicable to {self.TYPE}")
+
+        with self.Pool(4) as p:
+            result = p.apply_async(time.sleep, (1.0,))
+
+        if self.TYPE == 'processes':
+            self.assertTrue(p._state, multiprocessing.pool.TERMINATE)
+        with self.assertRaises(RuntimeError):
+            result.get()
+
+    def test_get_result_when_pool_is_closed(self):
+        with self.Pool(4) as p:
+            result = p.apply_async(time.sleep, (1.0,))
+            p.close()
+            if self.TYPE == 'processes':
+                self.assertTrue(p._state, multiprocessing.pool.CLOSE)
+            with self.assertRaises(RuntimeError):
+                result.get()
+
+
 def raising():
     raise KeyError("key")
 
