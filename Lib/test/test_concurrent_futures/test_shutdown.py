@@ -330,6 +330,20 @@ class ProcessPoolShutdownTest(ExecutorShutdownTest):
         # shutdown.
         assert all([r == abs(v) for r, v in zip(res, range(-5, 5))])
 
+    def test_gh132969(self):
+        if isinstance(self, ProcessPoolForkMixin) \
+            or (self.get_context().get_start_method() == 'forkserver' and \
+            sys.platform.startswith('win')):
+            raise unittest.SkipTest("Test with 'fork' start method is excluded"
+                                    " or when OS is Windows with start method "
+                                    "is `forkserver`")
+
+        executor = futures.ProcessPoolExecutor(
+                max_workers=4, mp_context=self.get_context(),
+                max_tasks_per_child=1)
+        executor.shutdown(False)
+        self.assertTrue(1)
+
 
 create_executor_tests(globals(), ProcessPoolShutdownTest,
                       executor_mixins=(ProcessPoolForkMixin,
