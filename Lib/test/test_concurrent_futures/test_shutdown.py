@@ -331,9 +331,9 @@ class ProcessPoolShutdownTest(ExecutorShutdownTest):
         assert all([r == abs(v) for r, v in zip(res, range(-5, 5))])
 
     def test_gh132969(self):
-        if isinstance(self, ProcessPoolForkMixin) \
-            or (self.get_context().get_start_method() == 'forkserver' and \
-            sys.platform.startswith('win')):
+        start_method = self.get_context().get_start_method()
+        if start_method == 'fork' or \
+            (start_method == 'forkserver' and sys.platform.startswith('win')):
             raise unittest.SkipTest("Test with 'fork' start method is excluded"
                                     " or when OS is Windows with start method "
                                     "is `forkserver`")
