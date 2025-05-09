@@ -755,7 +755,7 @@ class ProcessPoolExecutor(_base.Executor):
                 self._executor_manager_thread_wakeup
 
     def _adjust_process_count(self):
-        if self._process is None:
+        if self._processes is None:
             return
 
         # if there's an idle process, we don't need to spawn a new one.
