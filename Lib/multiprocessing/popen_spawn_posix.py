@@ -36,10 +36,13 @@ class Popen(popen_fork.Popen):
         return fd
 
     def _launch(self, process_obj):
+        #_print(f'### _lauch: {process_obj = }')
         from . import resource_tracker
         tracker_fd = resource_tracker.getfd()
         self._fds.append(tracker_fd)
         prep_data = spawn.get_preparation_data(process_obj._name)
+        print(f'### _lauch: {prep_data = }')
+        print(f'### _lauch: {process_obj = }')
         fp = io.BytesIO()
         set_spawning_popen(self)
         try:
@@ -54,6 +57,8 @@ class Popen(popen_fork.Popen):
             child_r, parent_w = os.pipe()
             cmd = spawn.get_command_line(tracker_fd=tracker_fd,
                                          pipe_handle=child_r)
+            #_print(f'### {cmd = }')
+
             self._fds.extend([child_r, child_w])
             self.pid = util.spawnv_passfds(spawn.get_executable(),
                                            cmd, self._fds)

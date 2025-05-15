@@ -415,6 +415,7 @@ _NoValue = object()
 
 # Pickling machinery
 
+follow_me = ('nop', 'vars')
 class _Pickler:
 
     def __init__(self, file, protocol=None, *, fix_imports=True,
@@ -1153,7 +1154,7 @@ class _Pickler:
 
     def save_global(self, obj, name=None):
         write = self.write
-        memo = self.memo
+        #memo = self.memo
 
         if name is None:
             name = getattr(obj, '__qualname__', None)
@@ -1161,11 +1162,20 @@ class _Pickler:
                 name = obj.__name__
 
         module_name = whichmodule(obj, name)
+        if name in follow_me:
+            mod = sys.modules[module_name]
+            print(f' _Pickler.save_global: {vars(mod) = }')
+            print(f' _Pickler.save_global: {module_name = }, / {name = } / {mod = }'.center(120, '-'))
+
         if self.proto >= 2:
             code = _extension_registry.get((module_name, name), _NoValue)
+            if name in follow_me:
+                print(f' _Pickler.save_global: {code = }')
             if code is not _NoValue:
                 if code <= 0xff:
                     data = pack("<B", code)
+                    if name in follow_me:
+                        print(f' \t_Pickler.save_global: {data = }')
                     if data == b'\0':
                         # Should never happen in normal circumstances,
                         # since the type and the value of the code are
@@ -1179,6 +1189,8 @@ class _Pickler:
                 return
 
         if self.proto >= 4:
+            if name in follow_me:
+                print(f' _Pickler.save_global: self.proto >= 4')
             self.save(module_name)
             self.save(name)
             write(STACK_GLOBAL)
@@ -1202,8 +1214,12 @@ class _Pickler:
                     write(TUPLE2)
                 write(REDUCE)
         else:
+            if name in follow_me:
+                print(f' _Pickler.save_global: _save_top_level_by_name >= 4')
             self._save_toplevel_by_name(module_name, name)
 
+        if name in follow_me:
+            print(f' _Pickler.save_global: memoize >= 4')
         self.memoize(obj)
 
     def _save_toplevel_by_name(self, module_name, name):
@@ -1682,6 +1698,8 @@ class _Unpickler:
         self.append(obj)
 
     def find_class(self, module, name):
+        if name in follow_me:
+            print(f' _Unpickler.find_class({module!a}, {name!a})'.center(120, '.'))
         # Subclasses may override this.
         sys.audit('pickle.find_class', module, name)
         if self.proto < 3 and self.fix_imports:
@@ -1689,7 +1707,12 @@ class _Unpickler:
                 module, name = _compat_pickle.NAME_MAPPING[(module, name)]
             elif module in _compat_pickle.IMPORT_MAPPING:
                 module = _compat_pickle.IMPORT_MAPPING[module]
-        __import__(module, level=0)
+        if name in follow_me:
+            pass #_print(f'{sys.modules.keys() = }')
+        m = __import__(module, level=0)
+        if name in follow_me:
+            print(f' _Unpickler.find_class {m = }'.center(120, '.'))
+            #print(f' _Unpickler.find_class: {vars(m) = }'.center(120, '.'))
         if self.proto >= 4 and '.' in name:
             dotted_path = name.split('.')
             try:
@@ -1891,6 +1914,7 @@ def _loads(s, /, *, fix_imports=True, encoding="ASCII", errors="strict",
 
 # Use the faster _pickle if possible
 try:
+    raise ImportError
     from _pickle import (
         PickleError,
         PicklingError,

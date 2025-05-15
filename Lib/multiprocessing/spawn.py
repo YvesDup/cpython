@@ -84,6 +84,7 @@ def get_command_line(**kwds):
     '''
     Returns prefix of command line used for spawning a child process
     '''
+    #_print(f'{kwds = }')
     if getattr(sys, 'frozen', False):
         return ([sys.executable, '--multiprocessing-fork'] +
                 ['%s=%r' % item for item in kwds.items()])
@@ -161,6 +162,7 @@ def get_preparation_data(name):
     '''
     Return info about parent needed by child to unpickle process object
     '''
+    #_print("*** prepare_data")
     _check_not_importing_main()
     d = dict(
         log_to_stderr=util._log_to_stderr,
@@ -191,7 +193,10 @@ def get_preparation_data(name):
     # or through direct execution (or to leave it alone entirely)
     main_module = sys.modules['__main__']
     main_mod_name = getattr(main_module.__spec__, "name", None)
-    if main_mod_name is not None:
+    if main_module.__package__ == '_pyrepl':
+        d['init_main_from_name'] = '__main__'
+    elif main_mod_name is not None:
+        #_print(f'*** {main_module = } / {main_mod_name = }')
         d['init_main_from_name'] = main_mod_name
     elif sys.platform != 'win32' or (not WINEXE and not WINSERVICE):
         main_path = getattr(main_module, '__file__', None)
@@ -199,7 +204,12 @@ def get_preparation_data(name):
             if (not os.path.isabs(main_path) and
                         process.ORIGINAL_DIR is not None):
                 main_path = os.path.join(process.ORIGINAL_DIR, main_path)
+            #_print(f'*** {main_path = }')
             d['init_main_from_path'] = os.path.normpath(main_path)
+        else:
+            pass #_print('*** main path is None')
+    else:
+        pass #_print("No_init_main_from")
 
     return d
 
@@ -244,15 +254,19 @@ def prepare(data):
         _fixup_main_from_name(data['init_main_from_name'])
     elif 'init_main_from_path' in data:
         _fixup_main_from_path(data['init_main_from_path'])
+    else:
+        pass #_print(f"@@@0 prepare nothing {data = }")
 
 # Multiprocessing module helpers to fix up the main module in
 # spawned subprocesses
 def _fixup_main_from_name(mod_name):
+    #_print(f'@@@1 {mod_name = }')
     # __main__.py files for packages, directories, zip archives, etc, run
     # their "main only" code unconditionally, so we don't even try to
     # populate anything in __main__, nor do we make any changes to
     # __main__ attributes
     current_main = sys.modules['__main__']
+    print(f'@@@1 {current_main = }')
     if mod_name == "__main__" or mod_name.endswith(".__main__"):
         return
 
@@ -265,16 +279,20 @@ def _fixup_main_from_name(mod_name):
     # the normal __main__ an alias to that
     old_main_modules.append(current_main)
     main_module = types.ModuleType("__mp_main__")
+    #_print(f'@@@1 run main on {mod_name = }')
+    #_print(f'@@@1 runpy.run_module ({mod_name!a}, "__mp_main__", alter_sys=True)')
     main_content = runpy.run_module(mod_name,
                                     run_name="__mp_main__",
                                     alter_sys=True)
     main_module.__dict__.update(main_content)
-    sys.modules['__main__'] = sys.modules['__mp_main__'] = main_module
+    sys.modules['__mp_main__'] = main_module
 
 
 def _fixup_main_from_path(main_path):
+    #_print(f'@@@2 {main_path = }')
     # If this process was forked, __main__ may already be populated
     current_main = sys.modules['__main__']
+    print(f'@@@2 {current_main = }/{current_main.__dict__.keys()}')
 
     # Unfortunately, the main ipython launch script historically had no
     # "if __name__ == '__main__'" guard, so we work around that
@@ -283,6 +301,8 @@ def _fixup_main_from_path(main_path):
     main_name = os.path.splitext(os.path.basename(main_path))[0]
     if main_name == 'ipython':
         return
+
+    #_print(f'@@@2 {current_main = }')
 
     # Otherwise, if __file__ already has the setting we expect,
     # there's nothing more to do
@@ -294,6 +314,7 @@ def _fixup_main_from_path(main_path):
     # non-main code that needs to be executed
     old_main_modules.append(current_main)
     main_module = types.ModuleType("__mp_main__")
+    #_print(f'@@@2 runpy.run_path({main_path!a}, "__mp_main__")')
     main_content = runpy.run_path(main_path,
                                   run_name="__mp_main__")
     main_module.__dict__.update(main_content)
