@@ -112,6 +112,7 @@ tok_backup(struct tok_state *tok, int c)
 
 static int
 set_ftstring_expr(struct tok_state* tok, struct token *token, char c) {
+puts("lexer in");
     assert(token != NULL);
     assert(c == '}' || c == ':' || c == '!');
     tokenizer_mode *tok_mode = TOK_GET_MODE(tok);
@@ -139,21 +140,24 @@ set_ftstring_expr(struct tok_state* tok, struct token *token, char c) {
 
         Py_ssize_t i = 0;
         Py_ssize_t j = 0;
-
-        for (i = 0, j = 0; i < input_length; i++) {
-            if (tok_mode->last_expr_buffer[i] == '#') {
+        char *pcur = &tok_mode->last_expr_buffer[0];
+        time_t t = time(NULL);
+        for (i = 0, j = 0; i < input_length; i++, pcur++) {
+            char cur = *pcur;
+            if (cur == '#') {
                 // Skip characters until newline or end of string
-                while (i < input_length && tok_mode->last_expr_buffer[i] != '\0') {
-                    if (tok_mode->last_expr_buffer[i] == '\n') {
-                        result[j++] = tok_mode->last_expr_buffer[i];
+                while (i < input_length && cur != '\0') {
+                    if (cur == '\n') {
+                        result[j++] = cur;
                         break;
                     }
-                    i++;
+                    pcur++;;
                 }
             } else {
-                result[j++] = tok_mode->last_expr_buffer[i];
+                result[j++] = cur;
             }
         }
+        printf("time = %lf\n", time(NULL)-t);
 
         result[j] = '\0';  // Null-terminate the result string
         res = PyUnicode_DecodeUTF8(result, j, NULL);
