@@ -47,7 +47,10 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
         self._is_shutdown = ctx.Value('B', False)
-        self._n_pending_processes = ctx.Array('Q',[0, 0])
+        # Semaphores used to count getters or peutters
+        # processes
+        self._sem_pending_getters = ctx.Semaphore(0)
+        self._sem_pending_putters = ctx.Semaphore(0)
 
         # For use by concurrent.futures
         self._ignore_epipe = False
@@ -59,12 +62,12 @@ class Queue(object):
         context.assert_spawning(self)
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
-                self._is_shutdown, self._n_pending_processes)
+                self._is_shutdown, self._sem_pending_getters, self._sem_pending_putters)
 
     def __setstate__(self, state):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
-         self._is_shutdown, self._n_pending_processes) = state
+         self._is_shutdown, self._sem_pending_getters, self._sem_pending_putters) = state
         self._reset()
 
     def _after_fork(self):
@@ -88,25 +91,33 @@ class Queue(object):
 
     @contextmanager
     def _handle_pending_processes(self, get_or_put):
-        # Count pending get or put processes in a shared array.
-        # These two values are only used when queue shutdowns
+        # Count pending getter or putter processes in a dedicated
+        # semaphores. They are only used when queue shutdowns
         # to release all pending processes.
-        with self._n_pending_processes:
-            self._n_pending_processes[get_or_put] += 1
+        msg = "GET" if get_or_put == Queue._GETTERS else "PUT"
+        sem = self._sem_pending_getters if get_or_put == Queue._GETTERS \
+                                       else self._sem_pending_putters
+        # Increments semaphore.
+        sem.release()
+        print(f'REL-{msg} {sem.locked() = } - {sem._semlock.name = } / {self._is_shutdown.value = }')
         try:
-            # Wraps calls to _sem.acquire() in put method and,
-            # calls to _rlock.acquire() or _recv_bytes() 
-            # in get method.
+            # Wraps blocking calls to:
+            # self. sem._sem.acquire() in put method,
+            # self._rlock.acquire() / _recv_bytes() in get method.
             yield
         finally:
-            with self._n_pending_processes:
-                self._n_pending_processes[get_or_put] -= 1
+            # Decrement semaphore.
+            sem.acquire()
+            print(f'ACQ-{msg} {sem.locked() = } - {sem._semlock.name = } / {self._is_shutdown.value = }')
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
-        if self._is_shutdown.value:
-            raise ShutDown
+        #if self._is_shutdown.value:
+        #    raise ShutDown
+
+        def _sem_is_zero(self, sem):
+            return sem.locked()
 
         with self._handle_pending_processes(Queue._PUTTERS):
             if not self._sem.acquire(block, timeout):
@@ -116,7 +127,7 @@ class Queue(object):
 
         if self._is_shutdown.value:
             # Released from acquire below.
-            if self._n_pending_processes[Queue._PUTTERS] > 0:
+            if not self._sem_pending_putters.locked():
                 debug('`put` release next pending putter process -> shutdown')
                 self._sem.release()
             raise ShutDown
@@ -130,8 +141,8 @@ class Queue(object):
     def get(self, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
-        if self._is_shutdown.value and self.empty():
-            raise ShutDown
+        #if self._is_shutdown.value and self.empty():
+        #    raise ShutDown
 
         if block and timeout is None:
             with self._handle_pending_processes(Queue._GETTERS):
@@ -204,17 +215,32 @@ class Queue(object):
         with self._notempty:
             if self._thread is None:
                 self._start_thread()
-            for _ in range(self._n_pending_processes[Queue._GETTERS]):
+
+            n = 0
+            while not self._sem_pending_getters.locked():
                 self._buffer.append(_sentinel_shutdown)
                 self._notempty.notify()
+                # self._sem_pending_getters.acquire()
+                n += 1
             else:
-                debug(f'when shutdown, {self._n_pending_processes[Queue._GETTERS]} ' +
+                debug(f'when shutdown, {n} ' +
                     'pending getter processes to release')
 
 
         # Unblock all pending putter processes.
-        if self._n_pending_processes[Queue._PUTTERS] > 0:
-            debug(f'when shutdown, {self._n_pending_processes[Queue._PUTTERS]} ' +
+        '''        #if self._n_pending_processes[Queue._PUTTERS] > 0:
+        n = 0
+        while not self._sem_pending_putters.locked():
+            self._sem_pending_putters.acquire()
+            self._sem.release()
+            n += 1
+        else:
+            debug(f'when shutdown, {n} ' +
+                    'pending putter processes to release')
+
+        '''
+        if not self._sem_pending_putters.locked():
+            debug(f'when shutdown, there are ' +
                   'pending putters processes to release')
             # We start releasing a first putter process.
             # In the `put` method, as soon as the target process is
@@ -222,8 +248,9 @@ class Queue(object):
             # there are no more putter processes.
             self._sem.release()
 
+
         # if there are pending getters processes, queue is empty.
-        if immediate and not self._n_pending_processes[Queue._GETTERS]:
+        if immediate and self._sem_pending_getters.locked():
             debug(f'when shutdown, clear all items in pipe')
             self._clear()
 
@@ -436,7 +463,8 @@ class JoinableQueue(Queue):
                 raise Full
 
         if self._is_shutdown.value:
-            if self._n_pending_processes[Queue._PUTTERS] > 0:
+            # if self._n_pending_processes[Queue._PUTTERS] > 0:
+            if not self._sem_pending_putters.locked():
                 self._sem.release()
             raise ShutDown
 
