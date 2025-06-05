@@ -5531,6 +5531,13 @@ class TestWait(unittest.TestCase):
 
 class QueueShutDown(unittest.TestCase):
 
+    def test_shutdown_twice(self):
+        for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
+            q.shutdown(immediate=False)
+            with self.assertRaises(RuntimeError):
+                q.shutdown(immediate=False)
+            q.close()
+
     def test_shutdown_empty(self):
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
             q.shutdown(immediate=False)
@@ -5538,6 +5545,8 @@ class QueueShutDown(unittest.TestCase):
                 q.put("data")
             with self.assertRaises(pyqueue.ShutDown):
                 q.get()
+            q.close()
+
 
     def test_shutdown_nonempty(self):
         for q in multiprocessing.Queue(1), multiprocessing.JoinableQueue(1):
@@ -5548,6 +5557,7 @@ class QueueShutDown(unittest.TestCase):
             with self.assertRaises(pyqueue.ShutDown):
                 q.get()
             self.assertTrue(q.empty())
+            q.close()
 
     def test_shutdown_immediate(self):
         for q in multiprocessing.JoinableQueue(), multiprocessing.Queue():
@@ -5557,6 +5567,7 @@ class QueueShutDown(unittest.TestCase):
             with self.assertRaises(pyqueue.ShutDown):
                 q.get()
             self.assertTrue(q.empty())
+            q.close()
 
     def _shutdown_all_methods_in_one_process(self, immediate):
         # part 1: Queue
@@ -5567,7 +5578,7 @@ class QueueShutDown(unittest.TestCase):
         _wait()
         q.shutdown(immediate)
 
-        self.assertTrue(q._is_shutdown.value)
+        self.assertTrue(q._is_shutdown())
         with self.assertRaises(pyqueue.ShutDown):
             q.put("E")
         with self.assertRaises(pyqueue.ShutDown):
@@ -5615,6 +5626,7 @@ class QueueShutDown(unittest.TestCase):
                 q.get_nowait() # p.get(False)
             with self.assertRaises(pyqueue.ShutDown):
                 q.get(True, 1.0)
+            q.close()
 
     def test_shutdown_all_methods_in_one_process(self):
         return self._shutdown_all_methods_in_one_process(False)
@@ -5627,13 +5639,12 @@ class QueueShutDown(unittest.TestCase):
         try:
             item = q.get(*args)
             results.append(item)
-        except Exception as e:
+        except pyqueue.ShutDown as e:
             results.append(e)
 
     def test_shutdown_immediate_pending_get(self):
-        immediate= True
+        m =  multiprocessing.Manager()
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
-            m =  multiprocessing.Manager()
             results = m.list()
             n = 2
             ps = []
@@ -5641,21 +5652,22 @@ class QueueShutDown(unittest.TestCase):
                 ps.append(multiprocessing.Process(target=self._get, args=(q, results, True, None)))
                 ps[-1].start()
             _wait()
-            q.shutdown(immediate=immediate)
+            q.shutdown(immediate=True)
             for p in ps:
                 p.join()
             self.assertEqual(len(results), n)
             for i in range(n):
                 self.assertIsInstance(results[i], pyqueue.ShutDown)
-            # print(results)
+            q.close()
 
     def test_shutdown_pending_get(self):
         immediate= False
+        m =  multiprocessing.Manager()
+        results = m.list()
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
-            m =  multiprocessing.Manager()
-            results = m.list()
             n = 2
-            q.put("LO")
+            results = m.list()
+            q.put("YD")
             ps = []
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._get, args=(q, results, True, None)))
@@ -5665,8 +5677,8 @@ class QueueShutDown(unittest.TestCase):
             for p in ps:
                 p.join()
             self.assertEqual(len(results), n)
-            self.assertEqual(results.count("LO"), 1)
-            # print(results)
+            self.assertEqual(results.count("YD"), 1)
+            q.close()
 
     @classmethod
     def _put(cls, q, results):
@@ -5674,28 +5686,31 @@ class QueueShutDown(unittest.TestCase):
             item = os.getpid()
             q.put(item)
             results.append(item)
-        except Exception as e:
+        except pyqueue.ShutDown as e:
             results.append(e)
 
     def test_shutdown_immediate_pending_put(self):
-        immediate= True
         for q in multiprocessing.Queue(1), multiprocessing.JoinableQueue(1):
-            is_join_q = isinstance(q, type(multiprocessing.JoinableQueue()))
-            # print(f"test_shutdown_immediate_pending_put for {type(q)!a} vs {is_join_q = } and shutdown(immediate={immediate})")
+            print(type(q))
             m =  multiprocessing.Manager()
             results = m.list()
-            n = 4
+            n = 10
+            m = 3
             ps = []
             for _ in range(n):
-                ps.append(multiprocessing.Process(target=self._put, args=(q, results)))
+                ps.append(multiprocessing.Process(target=self._put,
+                                                  args=(q, results)))
                 ps[-1].start()
-            q.get()
+            for _ in range(m):
+                q.get()
             _wait()
-            q.shutdown(immediate=immediate)
+            q.shutdown(immediate=True)
             for p in ps:
                 p.join()
             self.assertTrue(len(results))
-            # print(results)
+            self.assertEqual(sum(isinstance(r, pyqueue.ShutDown) for r in results), n-(m+1))
+            print(results)
+            q.close()
 
 #
 # Issue 14151: Test invalid family on invalid environment
