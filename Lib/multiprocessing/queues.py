@@ -99,7 +99,7 @@ class Queue(object):
         self._poll = self._reader.poll
 
     @contextmanager
-    def _handle_pending_processes(self, sem):
+    def _handle_pending_processes(self, sem, callback, raise_shutdown=False):
         # Count pending getter or putter processes in a dedicated
         # semaphores. They are only used when queue shutdowns
         # to release all pending processes.
@@ -110,21 +110,28 @@ class Queue(object):
             # _rlock.acquire() / _recv_bytes()/ _poll(*args) in get methods.
             yield
         finally:
-            if not self._is_shutdown():
-                sem.acquire()
+            sem.acquire()
+            if self._is_shutdown():
+                if not sem.locked():
+                    callback()
+                if raise_shutdown:
+                    raise ShutDown
+
+    def _check_pending_putters(self):
+        if not self._sem_pending_putters.locked():
+            self._sem.release()
+        raise ShutDown
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
-        if self._is_shutdown():
-            raise ShutDown
-
-        with self._handle_pending_processes(self._sem_pending_putters):
+        with self._handle_pending_processes(self._sem_pending_putters,
+                                            self._check_pending_putters,
+                                            True):
+            if self._is_shutdown():
+                raise ShutDown
             if not self._sem.acquire(block, timeout):
-                raise ShutDown if self._is_shutdown() else Full
-
-        if self._is_shutdown():
-            raise ShutDown
+                raise Full
 
         with self._notempty:
             if self._thread is None:
@@ -132,44 +139,41 @@ class Queue(object):
             self._buffer.append(obj)
             self._notempty.notify()
 
+    def _check_pending_getters(self):
+        if not self._sem_pending_getters.locked():
+            self._put_sentinel()
+
     def get(self, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
-        if self._is_shutdown() and self.empty():
-            raise ShutDown
-
-        if block and timeout is None:
-            with self._handle_pending_processes(self._sem_pending_getters):
+        with self._handle_pending_processes(self._sem_pending_getters,
+                                            self._check_pending_getters):
+            if self._is_shutdown() and self.empty():
+                raise ShutDown
+            if block and timeout is None:
                 with self._rlock:
-                    if self._is_shutdown() and self.empty():
-                        #print(f'{self._is_shutdown() = } and {self.empty() = }')
-                        raise ShutDown
                     res = self._recv_bytes()
-        else:
-            if block:
-                deadline = time.monotonic() + timeout
-            with self._handle_pending_processes(self._sem_pending_getters):
+                self._sem.release()
+            else:
+                if block:
+                    deadline = time.monotonic() + timeout
                 if not self._rlock.acquire(block, timeout):
-                    if self._is_shutdown() and self.empty():
-                        raise ShutDown
                     raise Empty
                 try:
                     if block:
                         timeout = deadline - time.monotonic()
                         if not self._poll(timeout):
-                            raise ShutDown if self._is_shutdown() else Empty
+                            raise Empty
                     elif not self._poll():
-                        raise ShutDown if self._is_shutdown() else Empty
+                        raise Empty
                     res = self._recv_bytes()
+                    self._sem.release()
                 finally:
                     self._rlock.release()
 
         item = _ForkingPickler.loads(res)
-        if self._is_shutdown() and isinstance(item, _SentinelShutdown):
-            print('_get_sentinel Shutdown')
+        if isinstance(item, _SentinelShutdown) and self._is_shutdown():
             raise ShutDown
-
-        self._sem.release()
         return item
 
     def qsize(self):
@@ -194,8 +198,11 @@ class Queue(object):
                     self._recv_bytes()
 
     def _put_sentinel(self):
-        self._buffer.append(_sentinel_shutdown)
-        self._notempty.notify()
+        with self._notempty:
+            if self._thread is None:
+                self._start_thread()
+            self._buffer.append(_sentinel_shutdown)
+            self._notempty.notify()
 
     def shutdown(self, immediate=False):
         if self._closed:
@@ -207,25 +214,20 @@ class Queue(object):
         str_shutdown = "SHUTDOWN" if immediate else 'shutdown'
         print(str_shutdown.center(80,'-'))
 
+        # Starting release all pending getter processes.
+        # Put specific data item in the pipe to the first process if exists.
         is_pending_getters = not self._sem_pending_getters.locked()
-        # Unblock all pending getter processes.
-        # Put specific data item in the pipe.
-        with self._notempty:
-            while not self._sem_pending_getters.locked():
-                if self._thread is None:
-                    self._start_thread()
-                self._sem_pending_getters.acquire()
-                self._put_sentinel()
+        if is_pending_getters:
+            self._put_sentinel()
 
-        # Unblock all pending putter processes.
+        # Starting release all pending putter processes.
         # Release the semaphore that control
-        # maxsize items
-        while not self._sem_pending_putters.locked():
-            self._sem_pending_putters.acquire()
+        # maxsize items in the first process.
+        if not self._sem_pending_putters.locked():
             self._sem.release()
 
         # Shutdown is right now and no pending getters,
-        # so empties the queue if necessary.
+        # so purges the queue if necessary.
         if immediate and not is_pending_getters:
             self._clear()
 
@@ -426,6 +428,12 @@ class JoinableQueue(Queue):
         self._cond, self._unfinished_tasks = state[-2:]
 
     def put(self, obj, block=True, timeout=None):
+        super().put(obj, block, timeout)
+        with self._notempty:
+            self._unfinished_tasks.release()
+        return
+
+        ''' OLD VERSION
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
         if self._is_shutdown():
@@ -436,6 +444,8 @@ class JoinableQueue(Queue):
                 raise ShutDown if self._is_shutdown() else Full
 
         if self._is_shutdown():
+            if not self._sem_pending_putters.locked():
+                self._sem.release()
             raise ShutDown
 
         with self._notempty:
@@ -454,6 +464,7 @@ class JoinableQueue(Queue):
             self._buffer.append(obj)
             self._unfinished_tasks.release()
             self._notempty.notify()
+        '''
 
     def task_done(self):
         with self._cond:

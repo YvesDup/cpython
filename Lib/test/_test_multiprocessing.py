@@ -5575,20 +5575,22 @@ class QueueShutDown(unittest.TestCase):
             self.assertTrue(q.empty())
             q.close()
 
-    def _shutdown_all_methods_in_one_process(self, immediate):
-        # part 1: Queue
-        q = multiprocessing.Queue()
-        q.put("L")
-        q.put_nowait("O")
-        q.put("YD")
+    datas = ("L", "O", "YD", "GVD", "AM", "KM9")
+    def _queue_shutdown_all_methods_in_one_process(self, size, immediate):
+        if size > 0:
+            q = multiprocessing.Queue(max(size, len(self.datas)))
+        else:
+            q = multiprocessing.Queue()
+        for item in self.datas[:size]:
+            q.put(item)
         _wait()
         q.shutdown(immediate)
         self.assertTrue(q._is_shutdown())
 
         with self.assertRaises(pyqueue.ShutDown):
-            q.put("E")
+            q.put(self.datas[size])
         with self.assertRaises(pyqueue.ShutDown):
-            q.put_nowait("W")
+            q.put_nowait(self.datas[size+1])
 
         if immediate:
             with self.assertRaises(pyqueue.ShutDown):
@@ -5598,12 +5600,15 @@ class QueueShutDown(unittest.TestCase):
             with self.assertRaises(pyqueue.ShutDown):
                 q.get(True, 1.0)
         else:
-            self.assertEqual(q.get(), "L") # p.get(True)
-            self.assertEqual(q.get_nowait(), "O") # q.get(False)
-            self.assertEqual(q.get(True, 1.0), "YD")
+            self.assertEqual(q.get(), self.datas[0]) # p.get(True)
+            self.assertEqual(q.get_nowait(), self.datas[1]) # q.get(False)
+            self.assertEqual(q.get(True, 1.0), self.datas[2])
 
-        # part 2: JoinableQueue
-        q = multiprocessing.JoinableQueue(2)
+    def _joinablequeue_shutdown_all_methods_in_one_process(self, size, immediate):
+        if size > 0:
+            q = multiprocessing.JoinableQueue(size)
+        else:
+            q = multiprocessing.JoinableQueue()
         q.put("L")
         q.put_nowait("O")
         _wait()
@@ -5635,11 +5640,21 @@ class QueueShutDown(unittest.TestCase):
                 q.get(True, 1.0)
             q.close()
 
-    def test_shutdown_all_methods_in_one_process(self):
-        return self._shutdown_all_methods_in_one_process(False)
+    def test_shutdown_queue_all_methods_in_one_process(self):
+        self._queue_shutdown_all_methods_in_one_process(-1, False)
+        self._queue_shutdown_all_methods_in_one_process(-1, True)
 
-    def test_shutdown_immediate_all_methods_in_one_process(self):
-        return self._shutdown_all_methods_in_one_process(True)
+    def test_shutdown_queue_size_all_methods_in_one_process(self):
+        self._queue_shutdown_all_methods_in_one_process(3, False)
+        self._queue_shutdown_all_methods_in_one_process(3, True)
+
+    def test_shutdown_joinablequeue_all_methods_in_one_process(self):
+        self._joinablequeue_shutdown_all_methods_in_one_process(-1, False)
+        self._joinablequeue_shutdown_all_methods_in_one_process(-1, True)
+
+    def test_shutdown_joinablequeue_size_all_methods_in_one_process(self):
+        self._joinablequeue_shutdown_all_methods_in_one_process(2, False)
+        self._joinablequeue_shutdown_all_methods_in_one_process(2, True)
 
     @classmethod
     def _get(cls, q, results, *args):
