@@ -5583,7 +5583,7 @@ class QueueShutDown(unittest.TestCase):
         except pyqueue.ShutDown:
             results.append(pyqueue.ShutDown)
 
-    @unittest.skipIf(sys.platform == 'darwin', 
+    @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
     def test_shutdown_count_pending_put(self):
         m =  multiprocessing.Manager()
@@ -5592,8 +5592,10 @@ class QueueShutDown(unittest.TestCase):
             n = 4
             ps = []
             for i in range(n):
-                ps.append(multiprocessing.Process(target=self._pending_put, args=(q, i, results)))
-                ps[-1].start()
+                ps.append(multiprocessing.Process(target=self._pending_put,
+                                                  args=(q, i, results)))
+            for p in ps:
+                p.start()
             _wait()
             self.assertEqual(q._sem_pending_putters.get_value(), n-1)
             q.shutdown(immediate=True)
@@ -5611,7 +5613,7 @@ class QueueShutDown(unittest.TestCase):
         except pyqueue.ShutDown:
             results.append(pyqueue.ShutDown)
 
-    @unittest.skipIf(sys.platform == 'darwin',  
+    @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
     def test_shutdown_count_pending_get(self):
         m =  multiprocessing.Manager()
@@ -5620,8 +5622,10 @@ class QueueShutDown(unittest.TestCase):
             n = 4
             ps = []
             for _ in range(n):
-                ps.append(multiprocessing.Process(target=self._pending_get, args=(q, results)))
-                ps[-1].start()
+                ps.append(multiprocessing.Process(target=self._pending_get,
+                                                  args=(q, results)))
+            for p in ps:
+                p.start()
             _wait()
             self.assertEqual(q._sem_pending_getters.get_value(), n)
             q.shutdown(immediate=True)
@@ -5727,8 +5731,10 @@ class QueueShutDown(unittest.TestCase):
             n = 4
             ps = []
             for _ in range(n):
-                ps.append(multiprocessing.Process(target=self._get, args=(q, results, True, None)))
-                ps[-1].start()
+                ps.append(multiprocessing.Process(target=self._get,
+                                                  args=(q, results, True, None)))
+            for p in ps:
+                p.start()
             _wait()
             q.shutdown(immediate=True)
             self.assertTrue(q._is_shutdown())
@@ -5750,7 +5756,8 @@ class QueueShutDown(unittest.TestCase):
             ps = []
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._get, args=(q, results, True, None)))
-                ps[-1].start()
+            for p in ps:
+                p.start()
             _wait()
             q.shutdown(immediate=immediate)
             self.assertTrue(q._is_shutdown())
@@ -5780,7 +5787,8 @@ class QueueShutDown(unittest.TestCase):
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._put,
                                                   args=(q, results)))
-                ps[-1].start()
+            for p in ps:
+                p.start()
             for _ in range(m):
                 q.get()
             _wait()
