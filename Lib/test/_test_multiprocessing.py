@@ -5633,24 +5633,24 @@ class QueueShutDown(unittest.TestCase):
             for p in ps:
                 p.join()
             self.assertEqual(q._sem_pending_putters.get_value(), 0)
+            q.close()
 
-
-    datas = ("L", "O", "YD", "GVD", "AM", "KM9")
     def _queue_shutdown_all_methods_in_one_process(self, size, immediate):
+        datas = ("L", "O", "YD", "GVR", "AM", "KM9")
         if size > 0:
-            q = multiprocessing.Queue(max(size, len(self.datas)))
+            q = multiprocessing.Queue(min(size, len(datas)))
         else:
             q = multiprocessing.Queue()
-        for item in self.datas[:size]:
+        for item in datas[:size]:
             q.put(item)
         _wait()
         q.shutdown(immediate)
         self.assertTrue(q._is_shutdown())
 
         with self.assertRaises(pyqueue.ShutDown):
-            q.put(self.datas[size])
+            q.put(datas[size])
         with self.assertRaises(pyqueue.ShutDown):
-            q.put_nowait(self.datas[size+1])
+            q.put_nowait(datas[size+1])
 
         if immediate:
             with self.assertRaises(pyqueue.ShutDown):
@@ -5660,9 +5660,10 @@ class QueueShutDown(unittest.TestCase):
             with self.assertRaises(pyqueue.ShutDown):
                 q.get(True, 1.0)
         else:
-            self.assertEqual(q.get(), self.datas[0]) # p.get(True)
-            self.assertEqual(q.get_nowait(), self.datas[1]) # q.get(False)
-            self.assertEqual(q.get(True, 1.0), self.datas[2])
+            self.assertEqual(q.get(), datas[0]) # p.get(True)
+            self.assertEqual(q.get_nowait(), datas[1]) # q.get(False)
+            self.assertEqual(q.get(True, 1.0), datas[2])
+        q.close()
 
     def _joinablequeue_shutdown_all_methods_in_one_process(self, size, immediate):
         if size > 0:
@@ -5698,7 +5699,7 @@ class QueueShutDown(unittest.TestCase):
                 q.get_nowait() # p.get(False)
             with self.assertRaises(pyqueue.ShutDown):
                 q.get(True, 1.0)
-            q.close()
+        q.close()
 
     def test_shutdown_queue_all_methods_in_one_process(self):
         self._queue_shutdown_all_methods_in_one_process(-1, False)
@@ -5748,9 +5749,8 @@ class QueueShutDown(unittest.TestCase):
     def test_shutdown_pending_get(self):
         immediate= False
         m =  multiprocessing.Manager()
-        results = m.list()
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
-            n = 2
+            n = 5
             results = m.list()
             q.put("YD")
             ps = []
@@ -5774,22 +5774,23 @@ class QueueShutDown(unittest.TestCase):
             item = os.getpid()
             q.put(item)
             results.append(item)
-        except pyqueue.ShutDown as e:
-            results.append(e)
+        except pyqueue.ShutDown:
+            results.append(pyqueue.ShutDown)
 
     def test_shutdown_immediate_pending_put(self):
-        for q in multiprocessing.Queue(1), multiprocessing.JoinableQueue(1):
-            m =  multiprocessing.Manager()
+        m =  multiprocessing.Manager()
+        size = 1
+        for q in multiprocessing.Queue(size), multiprocessing.JoinableQueue(size):
             results = m.list()
             n = 10
-            m = 3
+            nget = 3
             ps = []
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._put,
                                                   args=(q, results)))
             for p in ps:
                 p.start()
-            for _ in range(m):
+            for _ in range(nget):
                 q.get()
             _wait()
             q.shutdown(immediate=True)
@@ -5798,7 +5799,7 @@ class QueueShutDown(unittest.TestCase):
             for p in ps:
                 p.join()
             self.assertTrue(len(results))
-            self.assertEqual(sum(isinstance(r, pyqueue.ShutDown) for r in results), n-(m+1))
+            self.assertEqual(results.count(pyqueue.ShutDown), n-(nget+size))
             q.close()
 
 #
