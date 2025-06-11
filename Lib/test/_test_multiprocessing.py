@@ -5575,6 +5575,62 @@ class QueueShutDown(unittest.TestCase):
             self.assertTrue(q.empty())
             q.close()
 
+    @classmethod
+    def _pending_put(cls, q, val, results):
+        try:
+            q.put(val)
+            results.append(val)
+        except pyqueue.ShutDown:
+            results.append(pyqueue.ShutDown)
+
+    @unittest.skipIf(sys.platform == 'darwin', 
+                     "'get_value' is not implemented on MacOSX")
+    def test_shutdown_count_pending_put(self):
+        m =  multiprocessing.Manager()
+        for q in multiprocessing.Queue(1), multiprocessing.JoinableQueue(1):
+            results = m.list()
+            n = 4
+            ps = []
+            for i in range(n):
+                ps.append(multiprocessing.Process(target=self._pending_put, args=(q, i, results)))
+                ps[-1].start()
+            _wait()
+            self.assertEqual(q._sem_pending_putters.get_value(), n-1)
+            q.shutdown(immediate=True)
+            self.assertTrue(q._is_shutdown())
+            for p in ps:
+                p.join()
+            self.assertEqual(q._sem_pending_putters.get_value(), 0)
+            self.assertEqual(results.count(pyqueue.ShutDown), n-1)
+            q.close()
+
+    @classmethod
+    def _pending_get(cls, q, results):
+        try:
+            results.append(q.get())
+        except pyqueue.ShutDown:
+            results.append(pyqueue.ShutDown)
+
+    @unittest.skipIf(sys.platform == 'darwin',  
+                     "'get_value' is not implemented on MacOSX")
+    def test_shutdown_count_pending_get(self):
+        m =  multiprocessing.Manager()
+        for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
+            results = m.list()
+            n = 4
+            ps = []
+            for _ in range(n):
+                ps.append(multiprocessing.Process(target=self._pending_get, args=(q, results)))
+                ps[-1].start()
+            _wait()
+            self.assertEqual(q._sem_pending_getters.get_value(), n)
+            q.shutdown(immediate=True)
+            self.assertTrue(q._is_shutdown())
+            for p in ps:
+                p.join()
+            self.assertEqual(q._sem_pending_putters.get_value(), 0)
+
+
     datas = ("L", "O", "YD", "GVD", "AM", "KM9")
     def _queue_shutdown_all_methods_in_one_process(self, size, immediate):
         if size > 0:
@@ -5661,14 +5717,14 @@ class QueueShutDown(unittest.TestCase):
         try:
             item = q.get(*args)
             results.append(item)
-        except pyqueue.ShutDown as e:
-            results.append(e)
+        except pyqueue.ShutDown:
+            results.append(pyqueue.ShutDown)
 
     def test_shutdown_immediate_pending_get(self):
         m =  multiprocessing.Manager()
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
             results = m.list()
-            n = 2
+            n = 4
             ps = []
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._get, args=(q, results, True, None)))
@@ -5680,8 +5736,7 @@ class QueueShutDown(unittest.TestCase):
             for p in ps:
                 p.join()
             self.assertEqual(len(results), n)
-            for i in range(n):
-                self.assertIsInstance(results[i], pyqueue.ShutDown)
+            self.assertEqual(results.count(pyqueue.ShutDown), n)
             q.close()
 
     def test_shutdown_pending_get(self):
