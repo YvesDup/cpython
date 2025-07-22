@@ -318,13 +318,13 @@ This internal value is stored in a structure named CounterObject with:
 + the referenced semaphore name,
 + the (internal) current value,
 + a flag to reset counter when unlink/dealloc.
-+ a created timestamp.
++ a created timestamp, only when Py_DEBUG.
 
 A header with 4 members is created to manage all the CounterObject in the shared memory.
 + the count of CountedObject stored.
 + the count of available slots.
 + the size of shared memory.
-+ the count of attached processes.
++ the count of attached processes, only when Py_DEBUG.
 
 With each Semaphore (SemLock) a mutex is created in order to avoid data races
 when the internal counter of CounterObject is updated.
@@ -344,8 +344,10 @@ When unlink is called, Semaphore and its associated mutex are unlink, CounterObj
 |                 |                |          |             |             |
 |  n_semlocks     | sem_name       |          |             |             |
 |  n_semlocks     | internal_value |          |             |             |
-|  size_shm       | unlink_done  |          |             |             |
+|  size_shm       | unlink_done    |          |             |             |
+#ifdef Py_DEBUG
 |  n_procs        | ctimestamp     |          |             |             |
+#endif
 +-----------------+----------------+---/  /---+-------------+-------------+
 
 A dedicated lock is also created to control operations to the shared memory.
@@ -443,6 +445,12 @@ acquire_lock(SEM_HANDLE handle) {
     }
     if (res < 0) {
         errno = err;
+        if (errno == EAGAIN || errno == ETIMEDOUT) {
+            return 0;
+        }
+        if (errno == EINTR) {
+            return 0;
+        }
         PyErr_SetFromErrno(PyExc_OSError);
         return -1;
     }
@@ -470,15 +478,19 @@ delete_shm_semlock_counters(void) {
             if (ACQUIRE_SHM_LOCK) {
                 munmap(shm_semlock_counters.counters,
                        shm_semlock_counters.header->size_shm);
-
+#ifdef Py_DEBUG
                 // decreases counter of process.
                 --shm_semlock_counters.header->n_procs;
-
+#endif
                 /*
                 When and how to call the `shm_unlink' function ?
                 Currently, these two tests don't always work.
                 */
+#ifdef Py_DEBUG
                 if (!shm_semlock_counters.header->n_procs || shm_semlock_counters.create_shm == 1) {
+#else
+                if (shm_semlock_counters.create_shm == 1) {
+#endif
                     shm_unlink(shm_semlock_counters.name_shm);
                 }
                 shm_semlock_counters.state_this = THIS_CLOSED;
@@ -557,9 +569,13 @@ create_shm_semlock_counters(const char *from_sem_name) {
                         header->size_shm = size_shm;
                         header->n_slots = CALC_NB_SLOTS(size_shm);
                         header->n_semlocks = 0;
+#ifdef Py_DEBUG
                         header->n_procs = 0;
+#endif
                     }
+#ifdef Py_DEBUG
                     ++header->n_procs;
+#endif
 
                     /* Initialization is successful. */
                     shm_semlock_counters.state_this = THIS_AVAILABLE;
@@ -672,8 +688,9 @@ new_counter(SemLockObject *self, const char *name,
             strcpy(counter->sem_name, name);
             counter->internal_value = value;
             counter->unlink_done = unlink_done;
+#ifdef Py_DEBUG
             counter->ctimestamp = time(NULL);
-
+#endif
             // Update header.
             ++shm_semlock_counters.header->n_semlocks;
         } else {
@@ -683,8 +700,8 @@ new_counter(SemLockObject *self, const char *name,
         }
         if (!RELEASE_SHM_LOCK) {
             memset(counter, 0 ,sizeof(CounterObject));
-            --shm_semlock_counters.header->n_semlocks;
             counter = NULL;
+            --shm_semlock_counters.header->n_semlocks;
         }
     }
     return counter;
@@ -705,7 +722,7 @@ dealloc_counter(CounterObject *counter) {
             // Update header.
             --shm_semlock_counters.header->n_semlocks;
             if (RELEASE_SHM_LOCK) {
-                return 0;
+                res = 0;
             }
         }
     }
@@ -888,13 +905,12 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
 #endif
     }
 
-    if (sem_post(self->handle) < 0)
-        return PyErr_SetFromErrno(PyExc_OSError);
-
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (ISSEMAPHORE(self)) {
         // error is set in ACQUIRE/RELEASE_* macros.
         if (ACQUIRE_COUNTER_MUTEX(self->handle_mutex)) {
+            if (sem_post(self->handle) < 0)
+                return PyErr_SetFromErrno(PyExc_OSError);
             ++self->counter->internal_value;
             if (!RELEASE_COUNTER_MUTEX(self->handle_mutex)) {
                 return NULL;
@@ -902,7 +918,14 @@ _multiprocessing_SemLock_release_impl(SemLockObject *self)
         } else {
             return NULL;
         }
+    } else {
+        if (sem_post(self->handle) < 0)
+            return PyErr_SetFromErrno(PyExc_OSError);
     }
+#else
+    if (sem_post(self->handle) < 0)
+        return PyErr_SetFromErrno(PyExc_OSError);
+
 #endif
 
     --self->count;
@@ -1191,14 +1214,14 @@ _multiprocessing_SemLock__get_value_impl(SemLockObject *self)
     // error is set in ACQUIRE/RELEASE_* macros.
     if (ACQUIRE_COUNTER_MUTEX(self->handle_mutex)) {
         sval = self->counter->internal_value;
+        if (sval < 0) {
+            sval = 0;
+        }
         if (!RELEASE_COUNTER_MUTEX(self->handle_mutex)) {
             return NULL;
         }
     } else {
         return NULL;
-    }
-    if (sval < 0) {
-        sval = 0;
     }
     return PyLong_FromLong((long)sval);
 #else

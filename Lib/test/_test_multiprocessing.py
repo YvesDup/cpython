@@ -6918,7 +6918,7 @@ class _TestMacOSXSemaphore(BaseTestCase):
                 time.sleep(delay)
 
     @classmethod
-    def _run_process(cls, sem, sem_meth, nthread=1, ntime=10, delay=0.1):
+    def _run_process(cls, sem, sem_meth, nthread=1, ntime=10, delay=0.01):
         ts = []
         for _ in range(nthread):
             t = threading.Thread(target=cls._run_thread,
@@ -6933,6 +6933,8 @@ class _TestMacOSXSemaphore(BaseTestCase):
         # n processes, threads per process and loops per threads
         n_p_acq, n_th_acq, n_loop_acq = 15, 5, 20
         n_p_rel, n_th_rel, n_loop_rel = 8, 8, 8
+        #n_p_acq, n_th_acq, n_loop_acq = 4, 2, 4
+        #n_p_rel, n_th_rel, n_loop_rel = 8, 2, 2
 
         n_acq = n_p_acq*n_th_acq*n_loop_acq
         n_rel = n_p_rel*n_th_rel*n_loop_rel
@@ -6940,18 +6942,19 @@ class _TestMacOSXSemaphore(BaseTestCase):
         ps = []
         for _ in range(n_p_acq):
             p = self.Process(target=self._run_process,
-                             args=(sem, ACQUIRE, n_th_acq, n_loop_acq, 0.01))
+                             args=(sem, ACQUIRE, n_th_acq, n_loop_acq))
             ps.append(p)
 
         for _ in range(n_p_rel):
             p = self.Process(target=self._run_process,
-                             args=(sem, RELEASE, n_th_rel, n_loop_rel, 0.005))
+                             args=(sem, RELEASE, n_th_rel, n_loop_rel))
             ps.append(p)
 
         for p in ps:
             p.start()
         for p in ps:
             p.join()
+        #time.sleep(0.01)
         self.assertEqual(sem.get_value(), n_rel)
 
 

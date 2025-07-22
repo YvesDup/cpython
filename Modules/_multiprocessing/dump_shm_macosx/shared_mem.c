@@ -2,6 +2,7 @@
 #include <signal.h>     // signal
 #include <stdio.h>      // printf, puts
 #include <stdlib.h>     // atexit
+#include <string.h>     // strerror
 #include <sys/errno.h>  // errno
 #include <unistd.h>     // sysconf
 
@@ -23,6 +24,22 @@ int acquire_lock(SEM_HANDLE sem) {
 int release_lock(SEM_HANDLE sem) {
     sem_post(sem);
     return 1;
+}
+
+int exist_lock(SEM_HANDLE sem) {
+    int res = sem_trywait(sem);
+    puts("+----------+");
+    if (res < 0) {
+        printf("SEM:%p -> %d (%s)\n", sem, res, strerror(res));
+    } else {
+        printf("SEM:%p -> Okay\n", sem);
+    }
+    puts("+----------+");
+    if (res >= 0) {
+        sem_post(sem);
+        return 0;
+    }
+    return res;
 }
 
 void connect_shm_semlock_counters(int unlink, int force_open, int call_release_lock) {
@@ -114,7 +131,9 @@ static void _delete_shm_semlock_counters(int unlink) {
             }
         }
         // close lock
+        exist_lock(shm_semlock_counters.handle_shm_lock);
         sem_close(shm_semlock_counters.handle_shm_lock);
+        exist_lock(shm_semlock_counters.handle_shm_lock);
         sem_unlink(shm_semlock_counters.name_shm_lock);
     }
 }
@@ -132,10 +151,18 @@ puts(__func__);
 
 void dump_shm_semlock_header(void) {
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
-        printf("n sems:%d - n sem_slots:%d, n procs:%d, size_shm:%d\n", header->n_semlocks,
-                                                                        header->n_slots,
-                                                                        header->n_procs,
-                                                                        header->size_shm);
+        printf("n sems:%d - n sem_slots:%d, size_shm:%d"
+#ifdef Py_DEBUG
+                                                ", n procs:%d"
+#endif
+                                                "\n",
+                                                header->n_semlocks,
+                                                header->n_slots,
+                                                header->size_shm
+#if Py_DEBUG
+                                                ,header->n_procs
+#endif
+                                                );
     }
 }
 

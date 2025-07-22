@@ -27,11 +27,18 @@ HeaderObject *header = NULL;
 CounterObject *counter =  NULL;
 
 static char *show_counter(char *p, CounterObject *counter) {
-    sprintf(p, "p:%p, n:%s, v:%d, u:%d, t:%s", counter,
-                                           counter->sem_name,
-                                           counter->internal_value,
-                                           counter->unlink_done,
-                                           ctime(&counter->ctimestamp));
+    sprintf(p, "p:%p, n:%s, v:%d, u:%d"
+#if Py_DEBUG
+                                ", t:%s",
+#endif
+                                counter,
+                                counter->sem_name,
+                                counter->internal_value,
+                                counter->unlink_done
+#if Py_DEBUG
+                                ,ctime(&counter->ctimestamp)
+#endif
+                            );
     return p;
 }
 
@@ -61,15 +68,16 @@ puts(__func__);
 
 int main(int argc, char *argv[]) {
     int repeat = 0;
-    long udelay = 5000;
+    long udelay = 1000;
     HeaderObject save = {0};
     int unlink = 0;
     int force_open = 1;
     int release_lock = 1;
 
     puts("--------");
+    SEM_HANDLE test_sem = (SEM_HANDLE)0x03;
+    exist_lock(test_sem);
     printf("PID:%d, PPID:%d\n", getpid(), getppid());
-    connect_shm_semlock_counters(unlink, force_open, release_lock);
     puts("+++++++++");
     if (argc > 1) {
         sscanf(argv[1], "%d", &repeat);
@@ -85,15 +93,22 @@ int main(int argc, char *argv[]) {
 
     printf("Repeat:%d, udelay:%lu\n", repeat, udelay);
 
+    connect_shm_semlock_counters(unlink, force_open, release_lock);
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
         memset(&save, '\0', sizeof(save));
         do {
-            if (memcmp(&save, shm_semlock_counters.header, sizeof(HeaderObject)) ) {
-                time_t timestamp = time(NULL);
-                puts(ctime(&timestamp));
-                dump_shm_semlock_counters();
-                memcpy(&save, shm_semlock_counters.header, sizeof(HeaderObject));
-                puts("==========");
+            if ACQUIRE_SHM_LOCK {
+                if (memcmp(&save, shm_semlock_counters.header, sizeof(HeaderObject)) ) {
+                    time_t timestamp = time(NULL);
+                    puts(ctime(&timestamp));
+                    dump_shm_semlock_counters();
+                    memcpy(&save, shm_semlock_counters.header, sizeof(HeaderObject));
+                    puts("==========");
+                }
+                //RELEASE_SHM_LOCK;
+                if (sem_post(shm_semlock_counters.handle_shm_lock) < 0) {
+                    break;
+                }
             }
             usleep(udelay);
         } while(repeat--);

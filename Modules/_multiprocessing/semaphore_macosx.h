@@ -24,14 +24,19 @@ typedef struct {
     int n_semlocks;   // Current number of semaphores. Starts 0.
     int n_slots;      // Current slots in the counter array.
     int size_shm;     // Size of allocated shared memory (this and N counters).
+#ifdef Py_DEBUG
     int n_procs;      // Number of attached processes (Used to check).
+    #pragma message ("Py_DEBUG on from " __FILE__ "")
+#endif
 } HeaderObject;
 
 typedef struct {
     char sem_name[16];  // Name of semaphore.
     int internal_value; // Internal value of semaphore, update on each acquire/release.
     int unlink_done;    // Can reset counter if unlink is done.
+#if Py_DEBUG
     time_t ctimestamp;  // Created timestamp.
+#endif
 } CounterObject;
 
 /*
@@ -54,12 +59,15 @@ typedef struct {
     CounterObject*counters;   // Pointer to first item of fix array (shared memory).
 }  CountersWorkaround;
 
-#define ACQUIRE_SHM_LOCK     (acquire_lock(shm_semlock_counters.handle_shm_lock) >= 0)
-#define RELEASE_SHM_LOCK     (release_lock(shm_semlock_counters.handle_shm_lock) >= 0)
+#define ACQUIRE_SHM_LOCK  (printf("ACQ shm on %d lineno\n", __LINE__) && acquire_lock(shm_semlock_counters.handle_shm_lock) >= 0)
+#define RELEASE_SHM_LOCK  (printf("\tREL shm on %d lineno\n", __LINE__) && release_lock(shm_semlock_counters.handle_shm_lock) >= 0)
 
-#define ACQUIRE_COUNTER_MUTEX(s) (acquire_lock((s)) >= 0)
-#define RELEASE_COUNTER_MUTEX(s) (release_lock((s)) >= 0)
-
+#define ACQUIRE_COUNTER_MUTEX(s) (printf("acq on %d (%p) lineno\n", __LINE__, s) && acquire_lock((s)) >= 0)
+#define RELEASE_COUNTER_MUTEX(s) (printf("\trel on %d (%p) lineno\n", __LINE__, s) && release_lock((s)) >= 0)
+/*
+#define ACQUIRE_COUNTER_MUTEX(s) ACQUIRE_SHM_LOCK // (acquire_lock((s)) >= 0)
+#define RELEASE_COUNTER_MUTEX(s) RELEASE_SHM_LOCK // (release_lock((s)) >= 0)
+*/
 #define ISSEMAPHORE2(m, k) ((m) > 1 && (k) == SEMAPHORE)
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
 
