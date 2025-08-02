@@ -99,7 +99,7 @@ class Queue(object):
         self._poll = self._reader.poll
 
     @contextmanager
-    def _handle_pending_processes(self, sem, callback, raise_shutdown=False):
+    def _handle_pending_processes(self, sem, callback, *callback_args):
         # Count pending getter or putter processes in a dedicated
         # semaphores. They are only used when queue shutdowns
         # to release all pending processes.
@@ -109,27 +109,28 @@ class Queue(object):
             #  sem._sem.acquire() in put method,
             # _rlock.acquire() / _recv_bytes()/ _poll(*args) in get methods.
             yield
+        except (Full, Empty):
+            if self._is_shutdown():
+                raise ShutDown
+            raise
         finally:
             sem.acquire()
             if self._is_shutdown():
-                if not sem.locked():
-                    callback()
-                if raise_shutdown:
-                    raise ShutDown
+                callback(*callback_args)
 
     def _check_pending_putters(self):
-        if not self._sem_pending_putters.locked():
-            self._sem.release()
-        raise ShutDown
+        if self._is_shutdown():
+            if not self._sem_pending_putters.locked():
+                self._sem.release()
+            raise ShutDown
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
+        if self._is_shutdown():
+            self._check_pending_putters()
         with self._handle_pending_processes(self._sem_pending_putters,
-                                            self._check_pending_putters,
-                                            True):
-            if self._is_shutdown():
-                raise ShutDown
+                                            self._check_pending_putters):
             if not self._sem.acquire(block, timeout):
                 raise Full
 
@@ -139,17 +140,25 @@ class Queue(object):
             self._buffer.append(obj)
             self._notempty.notify()
 
-    def _check_pending_getters(self):
-        if not self._sem_pending_getters.locked():
-            self._put_sentinel()
+    def _check_pending_getters(self, empty):
+        if self._is_shutdown() and empty:
+            if not self._sem_pending_getters.locked():
+                print("Send sentinel ...........".center(120, "-"))
+                self._put_sentinel()
+            else:
+                print("Not send .......".center(120, "-"))
+            raise ShutDown
+
 
     def get(self, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
+        empty = self.empty()
+        if self._is_shutdown() and empty:
+            self._check_pending_getters(empty)
         with self._handle_pending_processes(self._sem_pending_getters,
-                                            self._check_pending_getters):
-            if self._is_shutdown() and self.empty():
-                raise ShutDown
+                                            self._check_pending_getters,
+                                            empty):
             if block and timeout is None:
                 with self._rlock:
                     res = self._recv_bytes()
@@ -172,7 +181,7 @@ class Queue(object):
                     self._rlock.release()
 
         item = _ForkingPickler.loads(res)
-        if isinstance(item, _SentinelShutdown) and self._is_shutdown():
+        if self._is_shutdown() and isinstance(item, _SentinelShutdown):
             raise ShutDown
         return item
 
@@ -193,9 +202,9 @@ class Queue(object):
         return self.put(obj, False)
 
     def _clear(self):
-            while self._poll():
-                with self._rlock:
-                    self._recv_bytes()
+        while self._poll():
+            with self._rlock:
+                self._recv_bytes()
 
     def _put_sentinel(self):
         with self._notempty:
@@ -210,14 +219,15 @@ class Queue(object):
 
         if self._is_shutdown():
             raise RuntimeError(f"Queue {self!r} is already shutdown")
+
         self._set_shudown()
         str_shutdown = "SHUTDOWN" if immediate else 'shutdown'
         print(str_shutdown.center(80,'-'))
 
         # Starting release all pending getter processes.
-        # Put specific data item in the pipe to the first process if exists.
+        # Put specific item in the pipe to the first process if exists.
         is_pending_getters = not self._sem_pending_getters.locked()
-        if is_pending_getters:
+        if self.empty() and is_pending_getters:
             self._put_sentinel()
 
         # Starting release all pending putter processes.
@@ -397,8 +407,8 @@ class Queue(object):
     __class_getitem__ = classmethod(types.GenericAlias)
 
 
-# sentinel used to release
-# pending getter processes.
+# sentinel used to release pending getter processes
+# when queue shuts down.
 class _SentinelShutdown: pass
 _sentinel_shutdown = _SentinelShutdown()
 
