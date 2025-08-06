@@ -5611,7 +5611,7 @@ class QueueShutDown(unittest.TestCase):
             q.close()
 
     @classmethod
-    def _pending_get(cls, b, q, results):
+    def _pending_get(cls, q, b, results):
         try:
             b.wait()
             results.append(q.get())
@@ -5645,7 +5645,7 @@ class QueueShutDown(unittest.TestCase):
             q.close()
 
     def _queue_shutdown_all_methods_in_one_process(self, size, immediate):
-        datas = ("L", "O", "YD", "GVR", "AM", "KM9")
+        datas = ("L", "O", "YD", "KM9", "VH")
         if size > 0:
             q = multiprocessing.Queue(min(size, len(datas)))
         else:
@@ -5727,11 +5727,17 @@ class QueueShutDown(unittest.TestCase):
         self._joinablequeue_shutdown_all_methods_in_one_process(2, True)
 
     @classmethod
-    def _get(cls, q, results, *args):
+    def _get(cls, q, b, results):
+        pid = os.getpid()
         try:
-            item = q.get(*args)
+            print(f"wait {pid}")
+            b.wait()
+            print(f"go {pid}")
+            item = q.get()
+            print(f"append {pid})")
             results.append(item)
         except pyqueue.ShutDown:
+            print(f"except {pid}")
             results.append(pyqueue.ShutDown)
 
     def test_shutdown_immediate_pending_get(self):
@@ -5739,16 +5745,17 @@ class QueueShutDown(unittest.TestCase):
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
             results = m.list()
             n = 4
+            b = multiprocessing.Barrier(n+1)
             ps = []
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._get,
-                                                  args=(q, results, True, None)))
+                                                  args=(q, b, results)))
             for p in ps:
                 p.start()
+            b.wait()
             _wait()
             q.shutdown(immediate=True)
             self.assertTrue(q._is_shutdown())
-
             for p in ps:
                 p.join()
             self.assertEqual(len(results), n)
@@ -5756,31 +5763,38 @@ class QueueShutDown(unittest.TestCase):
             q.close()
 
     def test_shutdown_pending_get(self):
-        immediate= False
         m =  multiprocessing.Manager()
         for q in multiprocessing.Queue(), multiprocessing.JoinableQueue():
             n = 5
             results = m.list()
             q.put("YD")
+            _wait()
             ps = []
+            b = multiprocessing.Barrier(n+1)
             for _ in range(n):
-                ps.append(multiprocessing.Process(target=self._get, args=(q, results, True, None)))
+                ps.append(multiprocessing.Process(target=self._get,
+                                                  args=(q, b, results)))
             for p in ps:
                 p.start()
+            print("bwait")
+            b.wait()
             _wait()
-            q.shutdown(immediate=immediate)
+            q.shutdown(immediate=False)
             self.assertTrue(q._is_shutdown())
-
+            print(ps)
             for p in ps:
                 p.join()
+                print(p)
+            print(results)
             self.assertEqual(len(results), n)
             self.assertEqual(results.count("YD"), 1)
             q.close()
 
     @classmethod
-    def _put(cls, q, results):
+    def _put(cls, q, b, results):
         try:
             item = os.getpid()
+            b.wait()
             q.put(item)
             results.append(item)
         except pyqueue.ShutDown:
@@ -5793,12 +5807,14 @@ class QueueShutDown(unittest.TestCase):
             results = m.list()
             n = 10
             nget = 3
+            b = multiprocessing.Barrier(n+1)
             ps = []
             for _ in range(n):
                 ps.append(multiprocessing.Process(target=self._put,
-                                                  args=(q, results)))
+                                                  args=(q, b, results)))
             for p in ps:
                 p.start()
+            b.wait()
             for _ in range(nget):
                 q.get()
             _wait()

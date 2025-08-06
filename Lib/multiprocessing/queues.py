@@ -141,7 +141,8 @@ class Queue(object):
             self._notempty.notify()
 
     def _check_pending_getters(self, empty):
-        if self._is_shutdown() and empty:
+        print("checking getters")
+        if self._is_shutdown() and empty: # self.empty():
             if not self._sem_pending_getters.locked():
                 print("Send sentinel ...........".center(120, "-"))
                 self._put_sentinel()
@@ -154,8 +155,12 @@ class Queue(object):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
         empty = self.empty()
+        """
         if self._is_shutdown() and empty:
             self._check_pending_getters(empty)
+        """
+        if self._is_shutdown() and empty:
+            raise ShutDown
         with self._handle_pending_processes(self._sem_pending_getters,
                                             self._check_pending_getters,
                                             empty):
@@ -181,8 +186,9 @@ class Queue(object):
                     self._rlock.release()
 
         item = _ForkingPickler.loads(res)
-        if self._is_shutdown() and isinstance(item, _SentinelShutdown):
-            raise ShutDown
+        if self._is_shutdown():
+            if isinstance(item, _SentinelShutdown):
+                self._check_pending_getters(empty=True)
         return item
 
     def qsize(self):
@@ -220,14 +226,19 @@ class Queue(object):
         if self._is_shutdown():
             raise RuntimeError(f"Queue {self!r} is already shutdown")
 
-        self._set_shudown()
-        str_shutdown = "SHUTDOWN" if immediate else 'shutdown'
+        is_pending_getters = not self._sem_pending_getters.locked()
+        is_pending_putters = not self._sem_pending_putters.locked()
+        str_shutdown =  f"shutdown -> immediate:{immediate}"
+        str_shutdown += f"/PG:{is_pending_getters}" \
+                        f"/PP:{is_pending_putters}" \
+                        f"/Empty:{self.empty()}" \
+                        f"/Full:{self.full()}"
         print(str_shutdown.center(80,'-'))
-
+        self._set_shudown()
         # Starting release all pending getter processes.
         # Put specific item in the pipe to the first process if exists.
-        is_pending_getters = not self._sem_pending_getters.locked()
         if self.empty() and is_pending_getters:
+            print("put sentinel")
             self._put_sentinel()
 
         # Starting release all pending putter processes.
