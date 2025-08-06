@@ -213,6 +213,7 @@ class Queue(object):
                 self._recv_bytes()
 
     def _put_sentinel(self):
+        self._sem.acquire() # because _sem.release() call in get method.
         with self._notempty:
             if self._thread is None:
                 self._start_thread()
