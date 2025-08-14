@@ -215,7 +215,7 @@ class Queue(object):
             raise ValueError(f"Queue {self!r} is closed")
 
         if self._is_shutdown():
-            raise RuntimeError(f"Queue {self!r} is already shut down")
+            raise RuntimeError(f"Queue {self!r} already shut down")
 
         is_pending_getters = not self._sem_pending_getters.locked()
         is_pending_putters = not self._sem_pending_putters.locked()
@@ -409,7 +409,7 @@ class Queue(object):
     __class_getitem__ = classmethod(types.GenericAlias)
 
 
-# sentinel used to release pending getter processes
+# Sentinel item used to release pending getter processes
 # when queue shuts down.
 class _SentinelShutdown: pass
 _sentinel_shutdown = _SentinelShutdown()
@@ -440,43 +440,21 @@ class JoinableQueue(Queue):
         self._cond, self._unfinished_tasks = state[-2:]
 
     def put(self, obj, block=True, timeout=None):
-        super().put(obj, block, timeout)
-        with self._notempty:
-            self._unfinished_tasks.release()
-        return
-
-        ''' OLD VERSION
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
         if self._is_shutdown():
-            raise ShutDown
-
-        with self._handle_pending_processes(self._sem_pending_putters):
+            self._release_pending_putters()
+        with self._handle_pending_processes(self._sem_pending_putters,
+                                            self._release_pending_putters):
             if not self._sem.acquire(block, timeout):
-                raise ShutDown if self._is_shutdown() else Full
+                raise Full
 
-        if self._is_shutdown():
-            if not self._sem_pending_putters.locked():
-                self._sem.release()
-            raise ShutDown
-
-        with self._notempty:
-            # Here it seems to me that `self._cond` is unnecessary in
-            # the "with" instruction.
-            # This method and its inherited method are identical except
-            # a call to class instructions.
-            # Here this is a call to `self._unfinished_tasks.release()`.
-            #
-            # Comments are welcome about this remove.
-            #
-            #if self._is_shutdown():
-            #    raise ShutDown
+        with self._notempty, self._cond:
             if self._thread is None:
                 self._start_thread()
             self._buffer.append(obj)
             self._unfinished_tasks.release()
             self._notempty.notify()
-        '''
 
     def task_done(self):
         with self._cond:
@@ -491,10 +469,10 @@ class JoinableQueue(Queue):
                 self._cond.wait()
 
     def _clear(self):
-        while self._poll():
-            with self._rlock:
+        with self._rlock:
+            while self._poll():
                 self._recv_bytes()
-            self._unfinished_tasks.acquire(block=False)
+                self._unfinished_tasks.acquire(block=False)
         with self._cond:
             self._cond.notify_all()
 
