@@ -47,9 +47,9 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
 
-        # A Lock and 2 Semaphores used to control shutdown,
+        # 3 Semaphores used to control shutdown,
         # and count pending getters/putters processes.
-        self._lock_shutdown = ctx.Lock()
+        self._sem_shutdown = ctx.Semaphore(0)
         self._sem_pending_getters = ctx.Semaphore(0)
         self._sem_pending_putters = ctx.Semaphore(0)
 
@@ -60,22 +60,22 @@ class Queue(object):
             register_after_fork(self, Queue._after_fork)
 
     def _is_shutdown(self):
-        return self._lock_shutdown.locked()
+        return not self._sem_shutdown.locked()
 
     def _set_shudown(self):
-        return self._lock_shutdown.acquire()
+        return self._sem_shutdown.release()
 
     def __getstate__(self):
         context.assert_spawning(self)
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
-                self._lock_shutdown,
+                self._sem_shutdown,
                 self._sem_pending_getters, self._sem_pending_putters)
 
     def __setstate__(self, state):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
-         self._lock_shutdown,
+         self._sem_shutdown,
          self._sem_pending_getters, self._sem_pending_putters) = state
         self._reset()
 
@@ -227,21 +227,21 @@ class Queue(object):
         debug(str_shutdown)
         self._set_shudown()
 
+        # Shut down is right now and no pending getters,
+        # purge the queue if necessary.
+        if immediate and not is_pending_getters:
+            self._clear()
+
         # Starting release all pending getter processes.
-        # Put a first sentinel item in the pipe.
+        # Put a first sentinel item into the pipe.
         if self.empty() and is_pending_getters:
             self._put_sentinel()
 
         # Starting release all pending putter processes.
-        # Release the semaphore that control
-        # maxsize items.
+        # Release the semaphore that controls
+        # count of maxsize items.
         if is_pending_putters:
             self._sem.release()
-
-        # Shutdown is right now and no pending getters,
-        # so purge the queue if necessary.
-        if immediate and not is_pending_getters:
-            self._clear()
 
     def close(self):
         self._closed = True
