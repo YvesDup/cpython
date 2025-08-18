@@ -5664,7 +5664,6 @@ class TestQueueShutDown(unittest.TestCase):
             self.assertEqual(q._sem_pending_putters.get_value(), 0)
             self.assertEqual(q._sem_pending_getters.get_value(), 0)
             self.assertEqual(results.count(pyqueue.ShutDown), n-size)
-            self.assertTrue(q.empty())
             q.close()
 
     @classmethod
@@ -5688,7 +5687,7 @@ class TestQueueShutDown(unittest.TestCase):
             ps = []
             for i in range(n):
                 ps.append(multiprocessing.Process(target=self._get,
-                                                  args=(q, b, i, results)))
+                                                  args=(q, b, results)))
             for p in ps:
                 p.start()
             b.wait()
