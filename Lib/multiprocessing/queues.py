@@ -47,9 +47,11 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
 
-        # 3 Semaphores used to control shutdown,
-        # and count pending getters/putters processes.
-        self._sem_shutdown = ctx.Semaphore(0)
+        # 1 Lock to control shtudown data races
+        # 3 Semaphores - 1 used as shutdown flag,
+        # 2 others to count pending getters/putters processes.
+        self._lock_shutdown = ctx.Lock()
+        self._sem_flag_shutdown = ctx.Semaphore(0)
         self._sem_pending_getters = ctx.Semaphore(0)
         self._sem_pending_putters = ctx.Semaphore(0)
 
@@ -60,22 +62,22 @@ class Queue(object):
             register_after_fork(self, Queue._after_fork)
 
     def _is_shutdown(self):
-        return not self._sem_shutdown.locked()
+        return not self._sem_flag_shutdown.locked()
 
     def _set_shudown(self):
-        return self._sem_shutdown.release()
+        return self._sem_flag_shutdown.release()
 
     def __getstate__(self):
         context.assert_spawning(self)
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
-                self._sem_shutdown,
+                self._lock_shutdown, self._sem_flag_shutdown,
                 self._sem_pending_getters, self._sem_pending_putters)
 
     def __setstate__(self, state):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
-         self._sem_shutdown,
+         self._lock_shutdown, self._sem_flag_shutdown,
          self._sem_pending_getters, self._sem_pending_putters) = state
         self._reset()
 
@@ -116,9 +118,10 @@ class Queue(object):
 
     def _release_pending_putters(self):
         if self._is_shutdown():
-            if not self._sem_pending_putters.locked():
-                self._sem.release()
-            raise ShutDown
+            with self._lock_shutdown:
+                if not self._sem_pending_putters.locked():
+                    self._sem.release()
+                raise ShutDown
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
@@ -138,9 +141,10 @@ class Queue(object):
 
     def _release_pending_getters(self, empty):
         if self._is_shutdown() and empty:
-            if not self._sem_pending_getters.locked():
-                self._put_sentinel()
-            raise ShutDown
+            with self._lock_shutdown:
+                if not self._sem_pending_getters.locked():
+                    self._put_sentinel()
+                raise ShutDown
 
     def get(self, block=True, timeout=None):
         if self._closed:
@@ -214,34 +218,35 @@ class Queue(object):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
 
-        if self._is_shutdown():
-            raise RuntimeError(f"Queue {self!r} already shut down")
+        with self._lock_shutdown:
+            if self._is_shutdown():
+                raise RuntimeError(f"Queue {self!r} already shut down")
 
-        is_pending_getters = not self._sem_pending_getters.locked()
-        is_pending_putters = not self._sem_pending_putters.locked()
-        str_shutdown =  f"shutdown -> immediate:{immediate}"
-        str_shutdown += f"/PGetters:{is_pending_getters}" \
-                        f"/PPutters:{is_pending_putters}" \
-                        f"/Empty:{self.empty()}" \
-                        f"/Full:{self.full()}"
-        debug(str_shutdown)
-        self._set_shudown()
+            is_pending_getters = not self._sem_pending_getters.locked()
+            is_pending_putters = not self._sem_pending_putters.locked()
+            str_shutdown =  f"shutdown -> immediate:{immediate}"
+            str_shutdown += f"/PGetters:{is_pending_getters}" \
+                            f"/PPutters:{is_pending_putters}" \
+                            f"/Empty:{self.empty()}" \
+                            f"/Full:{self.full()}"
+            debug(str_shutdown)
+            self._set_shudown()
 
-        # Shut down is right now and no pending getters,
-        # purge the queue if necessary.
-        if immediate and not is_pending_getters:
-            self._clear()
+            # Shut down is right now and no pending getters,
+            # purge the queue if necessary.
+            if immediate and not is_pending_getters:
+                self._clear()
 
-        # Starting release all pending getter processes.
-        # Put a first sentinel item into the pipe.
-        if self.empty() and is_pending_getters:
-            self._put_sentinel()
+            # Starting release all pending getter processes.
+            # Put a first sentinel item into the pipe.
+            if self.empty() and is_pending_getters:
+                self._put_sentinel()
 
-        # Starting release all pending putter processes.
-        # Release the semaphore that controls
-        # count of maxsize items.
-        if is_pending_putters:
-            self._sem.release()
+            # Starting release all pending putter processes.
+            # Release the semaphore that controls
+            # count of maxsize items.
+            if is_pending_putters:
+                self._sem.release()
 
     def close(self):
         self._closed = True
