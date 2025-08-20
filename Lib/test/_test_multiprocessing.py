@@ -5529,7 +5529,7 @@ class TestWait(unittest.TestCase):
 # Issue gh-96471: WIP multiprocessing queue shutdown.
 #
 
-class TestQueueShutDown(BaseTestCase): #unittest.TestCase):
+class _TestQueueShutDown(BaseTestCase): #unittest.TestCase):
 
     def setUp(self):
         self.manager = multiprocessing.Manager()
