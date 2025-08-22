@@ -178,7 +178,7 @@ class Queue(object):
 
         item = _ForkingPickler.loads(res)
         if self._is_shutdown():
-            if isinstance(item, _SentinelShutdown):
+            if isinstance(item, _ShutdownSentinel):
                 self._release_pending_getters(empty=True)
         return item
 
@@ -293,7 +293,7 @@ class Queue(object):
             args=(self._buffer, self._notempty, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
-                  self._sem),
+                  self._sem, self._sem_flag_shutdown),
             name='QueueFeederThread',
             daemon=True,
         )
@@ -341,7 +341,7 @@ class Queue(object):
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
-              writer_close, ignore_epipe, onerror, queue_sem):
+              writer_close, ignore_epipe, onerror, queue_sem, sem_flag_shutdown):
         debug('starting thread to feed data to pipe')
         nacquire = notempty.acquire
         nrelease = notempty.release
@@ -370,6 +370,14 @@ class Queue(object):
                             reader_close()
                             writer_close()
                             return
+
+                        # When queue shuts down, don`t insert regular data
+                        # in pipe only shutdown sentinel.
+                        if not sem_flag_shutdown.locked() and \
+                            not isinstance(obj, _ShutdownSentinel):
+                            debug("Queue shut down, " \
+                                  "don't insert regular data in pipe")
+                            continue
 
                         # serialize the data before acquiring the lock
                         obj = _ForkingPickler.dumps(obj)
@@ -416,8 +424,8 @@ class Queue(object):
 
 # Sentinel item used to release pending getter processes
 # when queue shuts down.
-class _SentinelShutdown: pass
-_sentinel_shutdown = _SentinelShutdown()
+class _ShutdownSentinel: pass
+_sentinel_shutdown = _ShutdownSentinel()
 
 
 _sentinel = object()
