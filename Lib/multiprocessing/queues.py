@@ -47,7 +47,7 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
 
-        # 1 Lock to control shtudown data races
+        # 1 Lock to control shutdown data races,
         # 3 Semaphores - 1 used as shutdown flag,
         # 2 others to count pending getters/putters processes.
         self._lock_shutdown = ctx.Lock()
@@ -101,33 +101,34 @@ class Queue(object):
         self._poll = self._reader.poll
 
     @contextmanager
-    def _handle_pending_processes(self, sem, callback, *callback_args):
+    def _handle_pending_processes(self, sem, callback_when_shutdown,
+                                *callback_args):
         # Count pending getter or putter processes in a dedicated
         # semaphores. These 2 semaphores are only used when queue
         # shuts down to release all pending processes.
         sem.release()
         try:
-            # Wraps following blocking calls:
+            # Wraps potentialy blocking calls:
             #  sem._sem.acquire() in put method,
-            #  _recv_bytes()/ _poll(*args) in get method.
+            #  _recv_bytes()/_poll(*args) in get method.
             yield
         finally:
             sem.acquire()
             if self._is_shutdown():
-                callback(*callback_args)
+                callback_when_shutdown(*callback_args)
 
     def _release_pending_putters(self):
-        if self._is_shutdown():
-            with self._lock_shutdown:
-                if not self._sem_pending_putters.locked():
-                    self._sem.release()
-                raise ShutDown
+        with self._lock_shutdown:
+            if not self._sem_pending_putters.locked():
+                self._sem.release()
+            raise ShutDown
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
+
         if self._is_shutdown():
-            self._release_pending_putters()
+            raise ShutDown
         with self._handle_pending_processes(self._sem_pending_putters,
                                             self._release_pending_putters):
             if not self._sem.acquire(block, timeout):
@@ -140,7 +141,7 @@ class Queue(object):
             self._notempty.notify()
 
     def _release_pending_getters(self, empty):
-        if self._is_shutdown() and empty:
+        if empty:
             with self._lock_shutdown:
                 if not self._sem_pending_getters.locked():
                     self._put_sentinel()
@@ -149,8 +150,8 @@ class Queue(object):
     def get(self, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
-        empty = self.empty()
-        if self._is_shutdown() and empty:
+
+        if (empty := self.empty()) and self._is_shutdown():
             raise ShutDown
         with self._handle_pending_processes(self._sem_pending_getters,
                                             self._release_pending_getters,
@@ -177,9 +178,9 @@ class Queue(object):
                     self._rlock.release()
 
         item = _ForkingPickler.loads(res)
-        if self._is_shutdown():
-            if isinstance(item, _ShutdownSentinel):
-                self._release_pending_getters(empty=True)
+        if self._is_shutdown() \
+            and isinstance(item, _ShutdownSentinel):
+            self._release_pending_getters(empty=True)
         return item
 
     def qsize(self):
@@ -204,10 +205,11 @@ class Queue(object):
                 self._recv_bytes()
 
     def _put_sentinel(self):
-        # when put a sentinel queue is empty,
-        # so add a _sem.acquire is necessary to
+        # when put a sentinel into an empty queue,
+        # dont forget to call to _sem.acquire in order to to
         # maintain a correct count of acquire/release calls.
         self._sem.acquire()
+
         with self._notempty:
             if self._thread is None:
                 self._start_thread()
@@ -238,13 +240,12 @@ class Queue(object):
                 self._clear()
 
             # Starting release all pending getter processes.
-            # Put a first sentinel item into the pipe.
+            # Put a first shutdwon sentinel into the pipe.
             if self.empty() and is_pending_getters:
                 self._put_sentinel()
 
             # Starting release all pending putter processes.
-            # Release the semaphore that controls
-            # count of maxsize items.
+            # Release once the maxsize item semaphore.
             if is_pending_putters:
                 self._sem.release()
 
@@ -353,6 +354,7 @@ class Queue(object):
             wrelease = writelock.release
         else:
             wacquire = None
+        is_shutdown = lambda: not sem_flag_shutdown.locked()
 
         while 1:
             try:
@@ -373,8 +375,8 @@ class Queue(object):
 
                         # When queue shuts down, don`t insert regular data
                         # in pipe only shutdown sentinel.
-                        if not sem_flag_shutdown.locked() and \
-                            not isinstance(obj, _ShutdownSentinel):
+                        if is_shutdown() \
+                            and not isinstance(obj, _ShutdownSentinel):
                             debug("Queue shut down, " \
                                   "don't insert regular data in pipe")
                             continue
