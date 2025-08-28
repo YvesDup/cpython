@@ -19,6 +19,7 @@ import weakref
 import errno
 
 from queue import Empty, Full
+import queue
 
 from . import connection
 from . import context
@@ -81,11 +82,18 @@ class Queue(object):
         self._recv_bytes = self._reader.recv_bytes
         self._poll = self._reader.poll
 
+        self._simplequeue_put = queue.SimpleQueue()
+
     def put(self, obj, block=True, timeout=None):
         if self._closed:
             raise ValueError(f"Queue {self!r} is closed")
         if not self._sem.acquire(block, timeout):
             raise Full
+
+        if self._thread is None:
+            self._start_thread()
+        self._simplequeue_put.put(obj)
+        return
 
         with self._notempty:
             if self._thread is None:
@@ -174,10 +182,9 @@ class Queue(object):
         debug('Queue._start_thread()')
 
         # Start thread which transfers data from buffer to pipe
-        self._buffer.clear()
         self._thread = threading.Thread(
-            target=Queue._feed,
-            args=(self._buffer, self._notempty, self._send_bytes,
+            target=Queue._new_feed,
+            args=(self._simplequeue_put, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
                   self._sem),
@@ -204,6 +211,13 @@ class Queue(object):
 
         # Send sentinel to the thread queue object when garbage collected
         self._close = Finalize(
+            self, Queue._new_finalize_close,
+            [self._simplequeue_put],
+            exitpriority=10
+        )
+        return
+
+        self._close = Finalize(
             self, Queue._finalize_close,
             [self._buffer, self._notempty],
             exitpriority=10
@@ -225,6 +239,11 @@ class Queue(object):
         with notempty:
             buffer.append(_sentinel)
             notempty.notify()
+
+    @staticmethod
+    def _new_finalize_close(simplequeue_put):
+        debug('telling queue thread to quit')
+        simplequeue_put.put(_sentinel)
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
@@ -290,6 +309,74 @@ class Queue(object):
                     onerror(e, obj)
 
     @staticmethod
+    def _new_feed(simplequeue_put, send_bytes, writelock, reader_close,
+              writer_close, ignore_epipe, onerror, queue_sem):
+        debug('starting thread to feed data to pipe')
+        sentinel = _sentinel
+        if sys.platform != 'win32':
+            wacquire = writelock.acquire
+            wrelease = writelock.release
+        else:
+            wacquire = None
+
+        def _send_bytes_win32(obj):
+            send_bytes(obj)
+
+        def _send_bytes_other(obj):
+            wacquire()
+            try:
+                send_bytes(obj)
+            finally:
+                wrelease()
+
+        if sys.platform == 'win32':
+            _send_bytes = _send_bytes_win32
+        else:
+            _send_bytes = _send_bytes_other
+
+        while True:
+            try:
+                obj = simplequeue_put.get()
+                if obj is sentinel:
+                    debug('feeder thread got sentinel -- exiting')
+                    reader_close()
+                    writer_close()
+                    return
+
+                # serialize the data before acquiring the lock
+                obj = _ForkingPickler.dumps(obj)
+                _send_bytes(obj)
+                """
+                if wacquire is None:
+                    send_bytes(obj)
+                else:
+                    wacquire()
+                    try:
+                        send_bytes(obj)
+                    finally:
+                        wrelease()
+                """
+
+            except Exception as e:
+                if ignore_epipe and getattr(e, 'errno', 0) == errno.EPIPE:
+                    return
+                # Since this runs in a daemon thread the resources it uses
+                # may be become unusable while the process is cleaning up.
+                # We ignore errors which happen after the process has
+                # started to cleanup.
+                if is_exiting():
+                    info('error in queue thread: %s', e)
+                    return
+                else:
+                    # Since the object has not been sent in the queue, we need
+                    # to decrease the size of the queue. The error acts as
+                    # if the object had been silently removed from the queue
+                    # and this step is necessary to have a properly working
+                    # queue.
+                    queue_sem.release()
+                    onerror(e, obj)
+
+    @staticmethod
     def _on_queue_feeder_error(e, obj):
         """
         Private API hook called when feeding data in the background thread
@@ -331,6 +418,13 @@ class JoinableQueue(Queue):
         if not self._sem.acquire(block, timeout):
             raise Full
 
+        with self._cond:
+            if self._thread is None:
+                self._start_thread()
+            self._simplequeue_put.put(obj)
+            self._unfinished_tasks.release()
+        
+        return
         with self._notempty, self._cond:
             if self._thread is None:
                 self._start_thread()
