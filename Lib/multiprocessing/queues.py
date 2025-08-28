@@ -206,7 +206,7 @@ class Queue(object):
 
     def _put_sentinel(self):
         # when put a sentinel into an empty queue,
-        # dont forget to call to _sem.acquire in order to to
+        # dont forget to call to _sem.acquire in order to
         # maintain a correct count of acquire/release calls.
         self._sem.acquire()
 
@@ -240,12 +240,12 @@ class Queue(object):
                 self._clear()
 
             # Starting release all pending getter processes.
-            # Put a first shutdwon sentinel into the pipe.
+            # Put a first shutdown sentinel into the pipe.
             if self.empty() and is_pending_getters:
                 self._put_sentinel()
 
             # Starting release all pending putter processes.
-            # Release once the maxsize item semaphore.
+            # Unblock first pending one.
             if is_pending_putters:
                 self._sem.release()
 
@@ -294,7 +294,7 @@ class Queue(object):
             args=(self._buffer, self._notempty, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
-                  self._sem, self._sem_flag_shutdown),
+                  self._sem),
             name='QueueFeederThread',
             daemon=True,
         )
@@ -342,7 +342,7 @@ class Queue(object):
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
-              writer_close, ignore_epipe, onerror, queue_sem, sem_flag_shutdown):
+              writer_close, ignore_epipe, onerror, queue_sem):
         debug('starting thread to feed data to pipe')
         nacquire = notempty.acquire
         nrelease = notempty.release
@@ -354,7 +354,6 @@ class Queue(object):
             wrelease = writelock.release
         else:
             wacquire = None
-        is_shutdown = lambda: not sem_flag_shutdown.locked()
 
         while 1:
             try:
@@ -372,14 +371,6 @@ class Queue(object):
                             reader_close()
                             writer_close()
                             return
-
-                        # When queue shuts down, don`t insert regular data
-                        # in pipe only shutdown sentinel.
-                        if is_shutdown() \
-                            and not isinstance(obj, _ShutdownSentinel):
-                            debug("Queue shut down, " \
-                                  "don't insert regular data in pipe")
-                            continue
 
                         # serialize the data before acquiring the lock
                         obj = _ForkingPickler.dumps(obj)

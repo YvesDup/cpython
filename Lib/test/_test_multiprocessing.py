@@ -1474,14 +1474,14 @@ class _TestQueueShutDown(BaseTestCase):
         # adding value(s) may be in buffer but not yet in pipe so sleep a bit
         _wait()
 
-    def test_q_shutdown_twice(self):
+    def test_queue_shutdown_twice(self):
         q = multiprocessing.Queue()
         q.shutdown(immediate=False)
         with self.assertRaises(RuntimeError):
             q.shutdown(immediate=False)
         q.close()
 
-    def test_q_shutdown_empty(self):
+    def test_queue_shutdown_empty(self):
         q = multiprocessing.Queue()
         self.assertTrue(q.empty())
 
@@ -1494,7 +1494,7 @@ class _TestQueueShutDown(BaseTestCase):
             q.get()
         q.close()
 
-    def test_q_shutdown_notempty(self):
+    def test_queue_shutdown_notempty(self):
         q = multiprocessing.Queue()
         q.put("Y")
         q.put("D")
@@ -1511,7 +1511,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertTrue(q.empty())
         q.close()
 
-    def test_q_shutdown_full(self):
+    def test_queue_shutdown_full(self):
         q = multiprocessing.Queue(2)
         q.put("Y")
         q.put("D")
@@ -1530,7 +1530,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertFalse(q.full())
         q.close()
 
-    def test_q_shutdown_immediate_notempty(self):
+    def test_queue_shutdown_immediate_notempty(self):
         q = multiprocessing.Queue(3)
         q.put("data")
         self._wait()
@@ -1544,7 +1544,7 @@ class _TestQueueShutDown(BaseTestCase):
             q.get()
         q.close()
 
-    def test_q_shutdown_immediate_full(self):
+    def test_queue_shutdown_immediate_full(self):
         q = multiprocessing.Queue(2)
         q.put("YD")
         q.put("LO")
@@ -1570,7 +1570,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
-    def test_q_shutdown_count_pending_put(self):
+    def test_queue_shutdown_count_pending_put(self):
         # Queue must have a size
         size = 2
         q = multiprocessing.Queue(size)
@@ -1600,7 +1600,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(len(results), n)
         q.close()
 
-    def test_q_shutdown_immediate_pending_put(self):
+    def test_queue_shutdown_immediate_pending_put(self):
         # Regardless of the value (true or false) of the immediate variable,
         # the tests are identical.
         size = 5
@@ -1631,8 +1631,8 @@ class _TestQueueShutDown(BaseTestCase):
             x = reduction.ForkingPickler.loads(q._recv_bytes())
             support.print_warning(f"This data {x} is in pipe currently, but "
                                   "not present when shut down. This was due "
-                                  "to buffer/pipe delay transfer. " \
-                                  "This can rarely happen"
+                                  "to buffer/pipe delay transfer. "
+                                  "This can happen, rarely"
             )
         q.close()
 
@@ -1646,7 +1646,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
-    def test_q_shutdown_count_pending_get(self):
+    def test_queue_shutdown_count_pending_get(self):
         q = multiprocessing.Queue()
         results = self.manager.list()
         n = 8
@@ -1673,7 +1673,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(len(results), n)
         q.close()
 
-    def test_q_shutdown_immediate_pending_get(self):
+    def test_queue_shutdown_immediate_pending_get(self):
         q = multiprocessing.Queue()
         results = self.manager.list()
         n = 8
@@ -1697,7 +1697,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(results.count(pyqueue.ShutDown), n)
         q.close()
 
-    def test_q_shutdown_pending_get(self):
+    def test_queue_shutdown_pending_get(self):
         q = multiprocessing.Queue()
         n = 8
         results = self.manager.list()
@@ -1757,10 +1757,10 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(results[0], return_process+immediate)
         q.close()
 
-    def test_q_shutdown_immediate_join_joinablequeue(self):
+    def test_queue_shutdown_immediate_join_joinablequeue(self):
         return self._join_joinablequeue(True)
 
-    def test_q_shutdown_join_joinablequeue(self):
+    def test_queue_shutdown_join_joinablequeue(self):
         return self._join_joinablequeue(False)
 
     def _joinablequeue_shutdown_all_methods(self, immediate):
@@ -1802,7 +1802,7 @@ class _TestQueueShutDown(BaseTestCase):
         q.join()
         q.close()
 
-    def test_q_shutdown_all_methods(self):
+    def test_queue_shutdown_all_methods(self):
         n = None
         self._joinablequeue_shutdown_all_methods(immediate=False)
         self._joinablequeue_shutdown_all_methods(immediate=True)
