@@ -345,6 +345,7 @@ class Queue(object):
 
                 # serialize the data before acquiring the lock
                 obj = _ForkingPickler.dumps(obj)
+                """
                 _send_bytes(obj)
                 """
                 if wacquire is None:
@@ -355,7 +356,7 @@ class Queue(object):
                         send_bytes(obj)
                     finally:
                         wrelease()
-                """
+                """"""
 
             except Exception as e:
                 if ignore_epipe and getattr(e, 'errno', 0) == errno.EPIPE:
@@ -423,7 +424,7 @@ class JoinableQueue(Queue):
                 self._start_thread()
             self._simplequeue_put.put(obj)
             self._unfinished_tasks.release()
-        
+
         return
         with self._notempty, self._cond:
             if self._thread is None:
