@@ -19,6 +19,8 @@ import weakref
 import errno
 from contextlib import contextmanager
 
+import ctypes
+
 from queue import Empty, Full, ShutDown
 
 from . import connection
@@ -54,7 +56,7 @@ class Queue(object):
         # two Semaphores used to count pending
         # getters/putters processes.
         self._lock_shutdown = ctx.Lock()
-        self._value_flag_shutdown = ctx.Value('i', Queue.RUN)
+        self._value_flag_shutdown = ctx.Value(ctypes.c_uint, Queue.RUN)
         self._sem_pending_getters = ctx.Semaphore(0)
         self._sem_pending_putters = ctx.Semaphore(0)
 
