@@ -1502,6 +1502,7 @@ class _TestQueueShutDown(BaseTestCase):
         # adding value(s) may be in buffer but not yet in pipe so sleep a bit
         _wait()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_twice(self):
         q = multiprocessing.Queue()
         q.shutdown(immediate=False)
