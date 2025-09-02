@@ -19,8 +19,6 @@ import weakref
 import errno
 from contextlib import contextmanager
 
-import ctypes
-
 from queue import Empty, Full, ShutDown
 
 from . import connection
@@ -52,11 +50,13 @@ class Queue(object):
         self._sem = ctx.BoundedSemaphore(maxsize)
 
         # One Lock to control concurrent updates,
-        # one Value to distinguish shutdown state,
+        # two Semaphores to distinguish shutdown state,
         # two Semaphores used to count pending
         # getters/putters processes.
         self._lock_shutdown = ctx.Lock()
-        self._value_flag_shutdown = ctx.Value(ctypes.c_uint, Queue.RUN)
+        # self._value_flag_shutdown = ctx.Value('i', Queue.RUN)
+        self._sem_flag_shutdown = ctx.Semaphore(0)
+        self._sem_flag_shutdown_immediate = ctx.Semaphore(0)
         self._sem_pending_getters = ctx.Semaphore(0)
         self._sem_pending_putters = ctx.Semaphore(0)
 
@@ -66,25 +66,39 @@ class Queue(object):
         if sys.platform != 'win32':
             register_after_fork(self, Queue._after_fork)
 
-    def _is_shutdown(self):
+    """
+    def _is_shutdown_value(self):
         return self._value_flag_shutdown.value >= Queue.SHUTDOWN
 
-    def _set_shudown(self, immediate=False):
+    def _set_shutdown_value(self, immediate=False):
         with self._value_flag_shutdown:
             self._value_flag_shutdown.value = Queue.SHUTDOWN_IMMEDIATE \
                                             if immediate else Queue.SHUTDOWN
+    """
+
+    def _is_shutdown(self):
+        return not self._sem_flag_shutdown.locked()
+
+    def _set_shutdown(self, immediate=False):
+        self._sem_flag_shutdown.release()
+        if immediate:
+            self._sem_flag_shutdown.release()
 
     def __getstate__(self):
         context.assert_spawning(self)
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
-                self._lock_shutdown, self._value_flag_shutdown,
+                self._lock_shutdown,
+                # self._value_flag_shutdown,
+                self._sem_flag_shutdown, self._sem_flag_shutdown_immediate,
                 self._sem_pending_getters, self._sem_pending_putters)
 
     def __setstate__(self, state):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
-         self._lock_shutdown, self._value_flag_shutdown,
+         self._lock_shutdown,
+         # self._value_flag_shutdown,
+         self._sem_flag_shutdown, self._sem_flag_shutdown_immediate,
          self._sem_pending_getters, self._sem_pending_putters) = state
         self._reset()
 
@@ -248,7 +262,7 @@ class Queue(object):
                             f"/Empty:{self.empty()}" \
                             f"/Full:{self.full()}"
             debug(str_shutdown)
-            self._set_shudown(immediate)
+            self._set_shutdown(immediate)
 
             # Shut down is immediatly and no ther is no pending getter,
             # purge the queue (pipe). If data is only in the buffer and
@@ -311,7 +325,7 @@ class Queue(object):
             args=(self._buffer, self._notempty, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
-                  self._sem, self._value_flag_shutdown),
+                  self._sem, self._sem_flag_shutdown_immediate),
             name='QueueFeederThread',
             daemon=True,
         )
@@ -359,7 +373,8 @@ class Queue(object):
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
-              writer_close, ignore_epipe, onerror, queue_sem, flag_shutdown):
+              writer_close, ignore_epipe, onerror, queue_sem, 
+              flag_shutdown_immediate):
         debug('starting thread to feed data to pipe')
         nacquire = notempty.acquire
         nrelease = notempty.release
@@ -371,8 +386,7 @@ class Queue(object):
             wrelease = writelock.release
         else:
             wacquire = None
-        is_shutdown_immediate = lambda: flag_shutdown.value \
-                                        == Queue.SHUTDOWN_IMMEDIATE
+        is_shutdown_immediate = lambda: not flag_shutdown_immediate.locked
 
         while 1:
             try:
