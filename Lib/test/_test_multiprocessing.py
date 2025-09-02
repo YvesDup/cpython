@@ -1482,6 +1482,7 @@ class _TestQueue(BaseTestCase):
 
 class _TestQueueShutDown(BaseTestCase):
 
+    ALLOWED_TYPES = ('processes',)
 
     def setUp(self):
         self.manager = multiprocessing.Manager()
@@ -1490,10 +1491,6 @@ class _TestQueueShutDown(BaseTestCase):
 
     def tearDown(self):
         self.manager.shutdown()
-        for p in self.ps:
-            if p.is_alive():
-                p.terminate()
-            self._wait()
         self.ps = None
         return super().tearDown()
 
@@ -1514,9 +1511,11 @@ class _TestQueueShutDown(BaseTestCase):
     def test_queue_shutdown_twice(self):
         q = self.Queue()
         q.shutdown(immediate=False)
+        self.assertTrue(q._is_shutdown())
+
         with self.assertRaises(RuntimeError):
             q.shutdown(immediate=False)
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_empty(self):
@@ -1530,7 +1529,7 @@ class _TestQueueShutDown(BaseTestCase):
             q.put("data")
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_notempty(self):
@@ -1548,11 +1547,11 @@ class _TestQueueShutDown(BaseTestCase):
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
         self.assertTrue(q.empty())
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_full(self):
-        q = self.Queue(2)
+        q = self.Queue(maxsize=2)
         q.put("Y")
         q.put("D")
         self._wait()
@@ -1568,11 +1567,11 @@ class _TestQueueShutDown(BaseTestCase):
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
         self.assertFalse(q.full())
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_notempty(self):
-        q = self.Queue(3)
+        q = self.Queue(maxsize=3)
         q.put("data")
         self._wait()
 
@@ -1583,11 +1582,12 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertTrue(q.empty())
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
-        q.close()
+        close_queue(q)
+
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_full(self):
-        q = self.Queue(2)
+        q = self.Queue(maxsize=2)
         q.put("YD")
         q.put("LO")
         self._wait()
@@ -1599,7 +1599,8 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertTrue(q.empty())
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
-        q.close()
+        close_queue(q)
+
 
     @classmethod
     def _pending_put(cls, q, barrier, results):
@@ -1617,7 +1618,7 @@ class _TestQueueShutDown(BaseTestCase):
     def test_queue_shutdown_count_pending_put(self):
         # Queue must have a size
         size = 2
-        q = self.Queue(size)
+        q = self.Queue(maxsize=size)
         results = self.manager.list()
         n = 10
         b = self.Barrier(n+1)
@@ -1639,14 +1640,14 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
         self.assertEqual(q._sem_pending_getters.get_value(), 0)
         self.assertEqual(len(results), n)
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_put(self):
         # Regardless of the value (true or false) of the immediate variable,
         # the tests are identical.
         size = 5
-        q = self.Queue(size)
+        q = self.Queue(maxsize=size)
         results = self.manager.list()
         n = 30
         b = self.Barrier(n+1)
@@ -1672,7 +1673,8 @@ class _TestQueueShutDown(BaseTestCase):
                                   "to buffer/pipe delay transfer. "
                                   "This can happen, rarely"
             )
-        q.close()
+        close_queue(q)
+
 
     @classmethod
     def _pending_get(cls, q, barrier, results):
@@ -1706,7 +1708,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
         self.assertEqual(len(results), n)
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_get(self):
@@ -1720,24 +1722,23 @@ class _TestQueueShutDown(BaseTestCase):
         self._wait() # wait for all pending get processes to be blocked.
 
         q.shutdown(immediate=True)
-        self._wait() # adding value as 'sentinel shutdown'.
+        self._wait() # adding data as 'sentinel shutdown'.
         self.assertTrue(q._is_shutdown())
         for p in self.ps:
             p.join()
 
         self.assertEqual(len(results), n)
         self.assertEqual(results.count(pyqueue.ShutDown), n)
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_pending_get(self):
         q = self.Queue()
-        n = 8
-        results = self.manager.list()
         q.put("YD")
         self._wait()
 
-        self.ps = []
+        results = self.manager.list()
+        n = 8
         b = self.Barrier(n+1)
         self.start_processes(n, target=self._pending_get,
                              args=(q, b, results))
@@ -1751,7 +1752,7 @@ class _TestQueueShutDown(BaseTestCase):
 
         self.assertEqual(len(results), n)
         self.assertEqual(results.count("YD"), 1)
-        q.close()
+        close_queue(q)
 
     @classmethod
     def _shutdown(cls, q, immediate, results, retcode):
@@ -1785,7 +1786,7 @@ class _TestQueueShutDown(BaseTestCase):
             self.assertEqual(len(results), n+1)
             self.assertListEqual(results[1:], list(range(n)))
         self.assertEqual(results[0], return_process+immediate)
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_join_joinablequeue(self):
@@ -1797,7 +1798,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     def _joinablequeue_shutdown_all_methods(self, immediate):
         size = 2
-        q = self.JoinableQueue(size)
+        q = self.JoinableQueue(maxsize=size)
         q.put("L")
         q.put_nowait("O")
         self._wait()
@@ -1832,7 +1833,7 @@ class _TestQueueShutDown(BaseTestCase):
             with self.assertRaises(pyqueue.ShutDown):
                 q.get(True, 0.125)
         q.join()
-        q.close()
+        close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_all_methods(self):
