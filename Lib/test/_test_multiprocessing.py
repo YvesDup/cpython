@@ -1510,6 +1510,7 @@ class _TestQueueShutDown(BaseTestCase):
             q.shutdown(immediate=False)
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_empty(self):
         q = multiprocessing.Queue()
         self.assertTrue(q.empty())
@@ -1523,6 +1524,7 @@ class _TestQueueShutDown(BaseTestCase):
             q.get()
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_notempty(self):
         q = multiprocessing.Queue()
         q.put("Y")
@@ -1540,6 +1542,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertTrue(q.empty())
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_full(self):
         q = multiprocessing.Queue(2)
         q.put("Y")
@@ -1559,6 +1562,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertFalse(q.full())
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_notempty(self):
         q = multiprocessing.Queue(3)
         q.put("data")
@@ -1573,6 +1577,7 @@ class _TestQueueShutDown(BaseTestCase):
             q.get()
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_full(self):
         q = multiprocessing.Queue(2)
         q.put("YD")
@@ -1597,6 +1602,7 @@ class _TestQueueShutDown(BaseTestCase):
         except pyqueue.ShutDown:
             results.append(pyqueue.ShutDown)
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
     def test_queue_shutdown_count_pending_put(self):
@@ -1629,6 +1635,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(len(results), n)
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_put(self):
         # Regardless of the value (true or false) of the immediate variable,
         # the tests are identical.
@@ -1673,6 +1680,7 @@ class _TestQueueShutDown(BaseTestCase):
         except pyqueue.ShutDown:
             results.append(pyqueue.ShutDown)
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
     def test_queue_shutdown_count_pending_get(self):
@@ -1702,6 +1710,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(len(results), n)
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_get(self):
         q = multiprocessing.Queue()
         results = self.manager.list()
@@ -1726,6 +1735,7 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(results.count(pyqueue.ShutDown), n)
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_pending_get(self):
         q = multiprocessing.Queue()
         n = 8
@@ -1786,9 +1796,11 @@ class _TestQueueShutDown(BaseTestCase):
         self.assertEqual(results[0], return_process+immediate)
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_join_joinablequeue(self):
         return self._join_joinablequeue(True)
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_join_joinablequeue(self):
         return self._join_joinablequeue(False)
 
@@ -1831,11 +1843,11 @@ class _TestQueueShutDown(BaseTestCase):
         q.join()
         q.close()
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_all_methods(self):
         n = None
         self._joinablequeue_shutdown_all_methods(immediate=False)
         self._joinablequeue_shutdown_all_methods(immediate=True)
-
 
 #
 #
