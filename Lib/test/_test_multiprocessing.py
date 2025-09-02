@@ -1623,7 +1623,7 @@ class _TestQueueShutDown(BaseTestCase):
         n = 10
         b = self.Barrier(n+1)
 
-        self.start_processes(n, target=self._pending_put, 
+        self.start_processes(n, target=self._pending_put,
                              args=(q, b, results))
         b.wait()
         # to be sure that queue is full, and all 'n-size' others processes

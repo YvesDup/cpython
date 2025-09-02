@@ -33,8 +33,6 @@ from .util import debug, info, Finalize, register_after_fork, is_exiting
 
 class Queue(object):
 
-    RUN, SHUTDOWN, SHUTDOWN_IMMEDIATE = range(3)
-
     def __init__(self, maxsize=0, *, ctx):
         if maxsize <= 0:
             # Can raise ImportError (see issues #3770 and #23400)
@@ -50,13 +48,14 @@ class Queue(object):
         self._sem = ctx.BoundedSemaphore(maxsize)
 
         # One Lock to control concurrent updates,
-        # two Semaphores to distinguish shutdown state,
-        # two Semaphores used to count pending
-        # getters/putters processes.
         self._lock_shutdown = ctx.Lock()
-        # self._value_flag_shutdown = ctx.Value('i', Queue.RUN)
+        # Cannot use a ctx.Value because 'ctypes' library is
+        # not always available on all Linux platforms. So we
+        # use 2 Semaphores
         self._sem_flag_shutdown = ctx.Semaphore(0)
         self._sem_flag_shutdown_immediate = ctx.Semaphore(0)
+        # two Semaphores used to count pending
+        # getters/putters processes.
         self._sem_pending_getters = ctx.Semaphore(0)
         self._sem_pending_putters = ctx.Semaphore(0)
 
@@ -65,16 +64,6 @@ class Queue(object):
         self._reset()
         if sys.platform != 'win32':
             register_after_fork(self, Queue._after_fork)
-
-    """
-    def _is_shutdown_value(self):
-        return self._value_flag_shutdown.value >= Queue.SHUTDOWN
-
-    def _set_shutdown_value(self, immediate=False):
-        with self._value_flag_shutdown:
-            self._value_flag_shutdown.value = Queue.SHUTDOWN_IMMEDIATE \
-                                            if immediate else Queue.SHUTDOWN
-    """
 
     def _is_shutdown(self):
         return not self._sem_flag_shutdown.locked()
@@ -89,7 +78,6 @@ class Queue(object):
         return (self._ignore_epipe, self._maxsize, self._reader, self._writer,
                 self._rlock, self._wlock, self._sem, self._opid,
                 self._lock_shutdown,
-                # self._value_flag_shutdown,
                 self._sem_flag_shutdown, self._sem_flag_shutdown_immediate,
                 self._sem_pending_getters, self._sem_pending_putters)
 
@@ -97,7 +85,6 @@ class Queue(object):
         (self._ignore_epipe, self._maxsize, self._reader, self._writer,
          self._rlock, self._wlock, self._sem, self._opid,
          self._lock_shutdown,
-         # self._value_flag_shutdown,
          self._sem_flag_shutdown, self._sem_flag_shutdown_immediate,
          self._sem_pending_getters, self._sem_pending_putters) = state
         self._reset()
@@ -373,7 +360,7 @@ class Queue(object):
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
-              writer_close, ignore_epipe, onerror, queue_sem, 
+              writer_close, ignore_epipe, onerror, queue_sem,
               flag_shutdown_immediate):
         debug('starting thread to feed data to pipe')
         nacquire = notempty.acquire
