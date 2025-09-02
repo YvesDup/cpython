@@ -1497,6 +1497,14 @@ class _TestQueueShutDown(BaseTestCase):
         self.ps = None
         return super().tearDown()
 
+    def start_processes(self, n, target, args):
+        self.ps = []
+        for i in range(n):
+            self.ps.append(self.Process(target=target,
+                                        args=args))
+        for p in self.ps:
+            p.start()
+
     @classmethod
     def _wait(cls):
         # adding value(s) may be in buffer but not yet in pipe so sleep a bit
@@ -1504,7 +1512,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_twice(self):
-        q = multiprocessing.Queue()
+        q = self.Queue()
         q.shutdown(immediate=False)
         with self.assertRaises(RuntimeError):
             q.shutdown(immediate=False)
@@ -1512,7 +1520,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_empty(self):
-        q = multiprocessing.Queue()
+        q = self.Queue()
         self.assertTrue(q.empty())
 
         q.shutdown(immediate=False)
@@ -1526,7 +1534,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_notempty(self):
-        q = multiprocessing.Queue()
+        q = self.Queue()
         q.put("Y")
         q.put("D")
         self._wait()
@@ -1544,7 +1552,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_full(self):
-        q = multiprocessing.Queue(2)
+        q = self.Queue(2)
         q.put("Y")
         q.put("D")
         self._wait()
@@ -1564,7 +1572,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_notempty(self):
-        q = multiprocessing.Queue(3)
+        q = self.Queue(3)
         q.put("data")
         self._wait()
 
@@ -1579,7 +1587,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_full(self):
-        q = multiprocessing.Queue(2)
+        q = self.Queue(2)
         q.put("YD")
         q.put("LO")
         self._wait()
@@ -1594,7 +1602,8 @@ class _TestQueueShutDown(BaseTestCase):
         q.close()
 
     @classmethod
-    def _pending_put(cls, q, barrier, val, results):
+    def _pending_put(cls, q, barrier, results):
+        val = os.getpid()
         try:
             barrier.wait()
             q.put(val)
@@ -1602,22 +1611,19 @@ class _TestQueueShutDown(BaseTestCase):
         except pyqueue.ShutDown:
             results.append(pyqueue.ShutDown)
 
-    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_count_pending_put(self):
         # Queue must have a size
         size = 2
-        q = multiprocessing.Queue(size)
+        q = self.Queue(size)
         results = self.manager.list()
         n = 10
-        b = multiprocessing.Barrier(n+1)
-        self.ps = []
-        for i in range(n):
-            self.ps.append(multiprocessing.Process(target=self._pending_put,
-                                                   args=(q, b, i, results)))
-        for p in self.ps:
-            p.start()
+        b = self.Barrier(n+1)
+
+        self.start_processes(n, target=self._pending_put, 
+                             args=(q, b, results))
         b.wait()
         # to be sure that queue is full, and all 'n-size' others processes
         # are pending.
@@ -1640,16 +1646,12 @@ class _TestQueueShutDown(BaseTestCase):
         # Regardless of the value (true or false) of the immediate variable,
         # the tests are identical.
         size = 5
-        q = multiprocessing.Queue(size)
+        q = self.Queue(size)
         results = self.manager.list()
         n = 30
-        b = multiprocessing.Barrier(n+1)
-        self.ps = []
-        for i in range(n):
-            self.ps.append(multiprocessing.Process(target=self._pending_put,
-                                                    args=(q, b, i, results)))
-        for p in self.ps:
-            p.start()
+        b = self.Barrier(n+1)
+        self.start_processes(n, target=self._pending_put,
+                             args=(q, b, results))
         b.wait()
         # to be sure that queue is full, and all others processes are pending.
         self._wait()
@@ -1684,16 +1686,12 @@ class _TestQueueShutDown(BaseTestCase):
     @unittest.skipIf(sys.platform == 'darwin',
                      "'get_value' is not implemented on MacOSX")
     def test_queue_shutdown_count_pending_get(self):
-        q = multiprocessing.Queue()
+        q = self.Queue()
         results = self.manager.list()
         n = 8
-        b = multiprocessing.Barrier(n+1)
-        self.ps = []
-        for i in range(n):
-            self.ps.append(multiprocessing.Process(target=self._pending_get,
-                                                    args=(q, b, results)))
-        for p in self.ps:
-            p.start()
+        b = self.Barrier(n+1)
+        self.start_processes(n, target=self._pending_get,
+                             args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
 
@@ -1712,16 +1710,12 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_get(self):
-        q = multiprocessing.Queue()
+        q = self.Queue()
         results = self.manager.list()
         n = 8
-        b = multiprocessing.Barrier(n+1)
-        self.ps = []
-        for _ in range(n):
-            self.ps.append(multiprocessing.Process(target=self._pending_get,
-                                                    args=(q, b, results)))
-        for p in self.ps:
-            p.start()
+        b = self.Barrier(n+1)
+        self.start_processes(n, target=self._pending_get,
+                             args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
 
@@ -1737,19 +1731,16 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_pending_get(self):
-        q = multiprocessing.Queue()
+        q = self.Queue()
         n = 8
         results = self.manager.list()
         q.put("YD")
         self._wait()
 
         self.ps = []
-        b = multiprocessing.Barrier(n+1)
-        for _ in range(n):
-            self.ps.append(multiprocessing.Process(target=self._pending_get,
-                                                   args=(q, b, results)))
-        for p in self.ps:
-            p.start()
+        b = self.Barrier(n+1)
+        self.start_processes(n, target=self._pending_get,
+                             args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
 
@@ -1775,15 +1766,15 @@ class _TestQueueShutDown(BaseTestCase):
     def _join_joinablequeue(self, immediate):
         results = self.manager.list()
         n = 10
-        q = multiprocessing.JoinableQueue()
+        q = self.JoinableQueue()
         for i in range(n):
             q.put(i)
         self._wait()
 
         return_process = 1000
-        p = multiprocessing.Process(target=self._shutdown,
-                                    args=(q, immediate, results,
-                                          return_process+immediate))
+        p = self.Process(target=self._shutdown,
+                        args=(q, immediate, results,
+                              return_process+immediate))
         p.start()
         q.join()
         p.join()
@@ -1806,7 +1797,7 @@ class _TestQueueShutDown(BaseTestCase):
 
     def _joinablequeue_shutdown_all_methods(self, immediate):
         size = 2
-        q = multiprocessing.JoinableQueue(size)
+        q = self.JoinableQueue(size)
         q.put("L")
         q.put_nowait("O")
         self._wait()
@@ -1845,7 +1836,6 @@ class _TestQueueShutDown(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_all_methods(self):
-        n = None
         self._joinablequeue_shutdown_all_methods(immediate=False)
         self._joinablequeue_shutdown_all_methods(immediate=True)
 
