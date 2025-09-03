@@ -1481,13 +1481,13 @@ class _TestQueue(BaseTestCase):
 
     @classmethod
     def _wait(cls):
-        # adding value(s) may be in buffer but not yet in pipe so sleep a bit
+        # See _wait function.
         _wait()
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_twice(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue()
         q.shutdown(immediate=False)
@@ -1517,7 +1517,7 @@ class _TestQueue(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_notempty(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue()
         q.put("Y")
@@ -1538,19 +1538,19 @@ class _TestQueue(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_full(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue(maxsize=2)
-        q.put("Y")
-        q.put("D")
+        q.put("YY")
+        q.put("DD")
         self._wait()
 
         self.assertTrue(q.full())
         q.shutdown(immediate=False)
         self.assertTrue(q._is_shutdown())
 
-        self.assertEqual(q.get(), "Y")
-        self.assertEqual(q.get(), "D")
+        self.assertEqual(q.get(), "YY")
+        self.assertEqual(q.get(), "DD")
         with self.assertRaises(pyqueue.ShutDown):
             q.put("data")
         with self.assertRaises(pyqueue.ShutDown):
@@ -1561,7 +1561,7 @@ class _TestQueue(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_notempty(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue(maxsize=3)
         q.put("data")
@@ -1579,7 +1579,7 @@ class _TestQueue(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_full(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue(maxsize=2)
         q.put("YD")
@@ -1637,12 +1637,12 @@ class _TestQueue(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_all_methods(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         self._joinablequeue_shutdown_all_methods(immediate=False)
         self._joinablequeue_shutdown_all_methods(immediate=True)
 
-    def start_processes_pending(self, n, target, args):
+    def _start_processes_pending(self, n, target, args):
         self.manager = multiprocessing.Manager()
         self.ps = []
         for i in range(n):
@@ -1650,41 +1650,6 @@ class _TestQueue(BaseTestCase):
                                         args=args))
         for p in self.ps:
             p.start()
-
-#
-# Issue gh-96471: multiprocessing queue shutdown.
-#
-
-class TestQueueShutDown(BaseTestCase):
-
-    ALLOWED_TYPES = ('processes',)
-
-    def start_processes_pending(self, n, target, args):
-        self.manager = multiprocessing.Manager()
-        self.ps = []
-        for i in range(n):
-            self.ps.append(self.Process(target=target,
-                                        args=args))
-        for p in self.ps:
-            p.start()
-
-    @classmethod
-    def _wait(cls):
-        # adding value(s) may be in buffer but not yet in pipe so sleep a bit
-        _wait()
-
-    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
-    def test_queue_shutdown_twice(self):
-        if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
-
-        q = self.Queue()
-        q.shutdown(immediate=False)
-        self.assertTrue(q._is_shutdown())
-
-        with self.assertRaises(RuntimeError):
-            q.shutdown(immediate=False)
-        close_queue(q)
 
     @classmethod
     def _pending_put(cls, q, barrier, results):
@@ -1701,7 +1666,7 @@ class TestQueueShutDown(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_count_pending_put(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         # Queue must have a size
         size = 2
@@ -1710,8 +1675,8 @@ class TestQueueShutDown(BaseTestCase):
         n = 10
         b = self.Barrier(n+1)
 
-        self.start_processes_pending(n, target=self._pending_put,
-                                     args=(q, b, results))
+        self._start_processes_pending(n, target=self._pending_put,
+                                      args=(q, b, results))
         b.wait()
         # to be sure that queue is full, and all 'n-size' others processes
         # are pending.
@@ -1732,7 +1697,7 @@ class TestQueueShutDown(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_put(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         # Regardless of the value (true or false) of the immediate variable,
         # the tests are identical.
@@ -1741,8 +1706,8 @@ class TestQueueShutDown(BaseTestCase):
         results = multiprocessing.Manager().list()
         n = 30
         b = self.Barrier(n+1)
-        self.start_processes_pending(n, target=self._pending_put,
-                                     args=(q, b, results))
+        self._start_processes_pending(n, target=self._pending_put,
+                                      args=(q, b, results))
         b.wait()
         # We need to call _wait to be sure that queue is full,
         # and all others processes are pending.
@@ -1759,10 +1724,10 @@ class TestQueueShutDown(BaseTestCase):
         else:
             from multiprocessing import reduction
             x = reduction.ForkingPickler.loads(q._recv_bytes())
-            support.print_warning(f"This data {x} is in pipe currently, but "
-                                  "not present when shut down. This was due "
-                                  "to buffer/pipe delay transfer. "
-                                  "This can happen, rarely"
+            support.print_warning(f"This data {x} is into the pipe currently,"
+                                  " but not present when shut down."
+                                  " This was due to buffer/pipe delay"
+                                  " of transfer. This can happen, rarely"
                                  )
         close_queue(q)
 
@@ -1779,14 +1744,14 @@ class TestQueueShutDown(BaseTestCase):
                      "'get_value' is not implemented on MacOSX")
     def test_queue_shutdown_count_pending_get(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue()
         results = multiprocessing.Manager().list()
         n = 8
         b = self.Barrier(n+1)
-        self.start_processes_pending(n, target=self._pending_get,
-                                     args=(q, b, results))
+        self._start_processes_pending(n, target=self._pending_get,
+                                      args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
 
@@ -1806,14 +1771,14 @@ class TestQueueShutDown(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_pending_get(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue()
         results = multiprocessing.Manager().list()
         n = 8
         b = self.Barrier(n+1)
-        self.start_processes_pending(n, target=self._pending_get,
-                                     args=(q, b, results))
+        self._start_processes_pending(n, target=self._pending_get,
+                                      args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
 
@@ -1830,17 +1795,17 @@ class TestQueueShutDown(BaseTestCase):
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_pending_get(self):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue()
-        q.put("YD")
+        q.put("PSV")
         self._wait()
 
         results = multiprocessing.Manager().list()
         n = 8
         b = self.Barrier(n+1)
-        self.start_processes_pending(n, target=self._pending_get,
-                                     args=(q, b, results))
+        self._start_processes_pending(n, target=self._pending_get,
+                                      args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
 
@@ -1850,7 +1815,7 @@ class TestQueueShutDown(BaseTestCase):
             p.join()
 
         self.assertEqual(len(results), n)
-        self.assertEqual(results.count("YD"), 1)
+        self.assertEqual(results.count("PSV"), 1)
         close_queue(q)
 
     @classmethod
@@ -1865,7 +1830,7 @@ class TestQueueShutDown(BaseTestCase):
 
     def _join_joinablequeue(self, immediate):
         if self.TYPE != 'processes':
-            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+            self.skipTest(f'test not appropriate for {self.TYPE}')
 
         results = multiprocessing.Manager().list()
         n = 10
@@ -1876,7 +1841,7 @@ class TestQueueShutDown(BaseTestCase):
 
         return_process = 1000
         p = self.Process(target=self._shutdown,
-                        args=(q, immediate, results,
+                         args=(q, immediate, results,
                               return_process+immediate))
         p.start()
         q.join()
