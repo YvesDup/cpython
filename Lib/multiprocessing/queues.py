@@ -47,11 +47,11 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
 
-        # One Lock to control concurrent updates,
+        # One Lock to prevent concurrent updates,
         self._lock_shutdown = ctx.Lock()
         # Cannot use a ctx.Value because 'ctypes' library is
-        # not always available on all Linux platforms. So we
-        # use 2 Semaphores
+        # not always available on all Linux platforms. We
+        # use two Semaphores.
         self._sem_flag_shutdown = ctx.Semaphore(0)
         self._sem_flag_shutdown_immediate = ctx.Semaphore(0)
         # two Semaphores used to count pending
@@ -112,7 +112,7 @@ class Queue(object):
     def _handle_pending_processes(self, sem,):
         # Count pending getter or putter processes in a dedicated
         # semaphore. These 2 semaphores are only used when queue
-        # shuts down to release all pending processes.
+        # shuts down to release one by one all pending processes.
         sem.release()
         try:
             # Wraps potentialy blocking calls:
@@ -187,15 +187,15 @@ class Queue(object):
         finally:
             if self._is_shutdown() and empty:
                 # Try to unblock a next pending process
-                #  if exists. Raises this one.
+                # if exists. Raises this one.
                 self._release_pending_getters_and_raise()
 
         item = _ForkingPickler.loads(res)
         if self._is_shutdown() \
             and isinstance(item, _ShutdownSentinel):
-            # A pending getter process has just unblocked
-            # so try to unblock a next one if exists.
-            # Raises this.
+            # A pending getter process is just unblocked,
+            # we try to unblock a next one if exists.
+            # Raises an exception for this process.
             self._release_pending_getters_and_raise()
 
         return item
@@ -222,9 +222,10 @@ class Queue(object):
                 self._recv_bytes()
 
     def _put_sentinel(self):
-        # when put a sentinel into an empty queue,
+        # When put a sentinel into an empty queue,
         # dont forget to call to _sem.acquire in order to
-        # maintain a correct count of acquire/release calls.
+        # maintain a correct count of acquire/release
+        #calls for BoudedSempaphore.
         self._sem.acquire()
 
         with self._notempty:
@@ -251,19 +252,18 @@ class Queue(object):
             debug(str_shutdown)
             self._set_shutdown(immediate)
 
-            # Shut down is immediatly and no ther is no pending getter,
-            # purge the queue (pipe). If data is only in the buffer and
-            # not in pipe, let the 'put' thread erase the data.
+            # Shut down is immediatly and there is no pending getter,
+            # we purge the queue (pipe). If data is into the buffer and
+            # not into pipe, the 'put' thread should erase remaining data.
             if immediate and not is_pending_getters:
                 self._clear()
 
-            # Starting release all pending getter processes.
+            # Starting release one pending getter process.
             # Put a first shutdown sentinel into the pipe.
             if self.empty() and is_pending_getters:
                 self._put_sentinel()
 
-            # Starting release all pending putter processes.
-            # Unblock first pending one.
+            # Starting release one pending putter processes.
             if is_pending_putters:
                 self._sem.release()
 
