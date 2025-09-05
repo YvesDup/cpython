@@ -506,10 +506,12 @@ class JoinableQueue(Queue):
                 self._cond.wait()
 
     def _clear(self):
-        with self._rlock:
-            while self._poll():
-                self._recv_bytes()
-                self._unfinished_tasks.acquire(block=False)
+        super()._clear()
+
+        # Data could be in the buffer, not in the pipe.
+        # Call acquire until Semaphore counter is zero.
+        while not self._unfinished_tasks.locked():
+            self._unfinished_tasks.acquire(block=False)
         with self._cond:
             self._cond.notify_all()
 
