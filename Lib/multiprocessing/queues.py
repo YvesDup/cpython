@@ -510,9 +510,9 @@ class JoinableQueue(Queue):
 
         # Data could be in the buffer, not in the pipe.
         # Call acquire until Semaphore counter is zero.
-        while not self._unfinished_tasks.locked():
-            self._unfinished_tasks.acquire(block=False)
         with self._cond:
+            while not self._unfinished_tasks.locked():
+                self._unfinished_tasks.acquire(block=False)
             self._cond.notify_all()
 
 #
