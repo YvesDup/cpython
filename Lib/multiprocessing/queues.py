@@ -47,15 +47,14 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
 
-        # One Lock to prevent concurrent updates,
+
         self._lock_shutdown = ctx.Lock()
         # Cannot use a ctx.Value because 'ctypes' library is
-        # not always available on all Linux platforms. We
-        # use two Semaphores.
+        # not always available on all Linux platforms.
+        # Using Semaphores instead of heap.BufferWrapper
+        # as an array of int is more explicit.
         self._sem_flag_shutdown = ctx.Semaphore(0)
         self._sem_flag_shutdown_immediate = ctx.Semaphore(0)
-        # two Semaphores used to count pending
-        # getters/putters processes.
         self._sem_pending_getters = ctx.Semaphore(0)
         self._sem_pending_putters = ctx.Semaphore(0)
 
@@ -71,7 +70,7 @@ class Queue(object):
     def _set_shutdown(self, immediate=False):
         self._sem_flag_shutdown.release()
         if immediate:
-            self._sem_flag_shutdown.release()
+            self._sem_flag_shutdown_immediate.release()
 
     def __getstate__(self):
         context.assert_spawning(self)
@@ -109,7 +108,7 @@ class Queue(object):
         self._poll = self._reader.poll
 
     @contextmanager
-    def _handle_pending_processes(self, sem,):
+    def _handle_pending_processes(self, sem):
         # Count pending getter or putter processes in a dedicated
         # semaphore. These 2 semaphores are only used when queue
         # shuts down to release one by one all pending processes.
@@ -140,8 +139,6 @@ class Queue(object):
                     raise Full
         finally:
             if self._is_shutdown():
-                # Try to unblock a next pending process
-                #  if exists. Raises this one.
                 self._release_pending_putters_and_raise()
 
         with self._notempty:
@@ -186,8 +183,6 @@ class Queue(object):
                         self._rlock.release()
         finally:
             if self._is_shutdown() and empty:
-                # Try to unblock a next pending process
-                # if exists. Raises this one.
                 self._release_pending_getters_and_raise()
 
         item = _ForkingPickler.loads(res)
@@ -373,8 +368,7 @@ class Queue(object):
             wrelease = writelock.release
         else:
             wacquire = None
-        is_shutdown_immediate = lambda: not flag_shutdown_immediate.locked
-
+        is_shutdown_immediate = lambda: not flag_shutdown_immediate.locked()
         while 1:
             try:
                 nacquire()
@@ -396,8 +390,8 @@ class Queue(object):
                         # regular data in pipe, only shutdown sentinel.
                         if is_shutdown_immediate() \
                             and not isinstance(obj, _ShutdownSentinel):
-                            debug("Queue shut down immediatly, " \
-                                  "don't insert regular data in pipe")
+                            debug("Queue shuts down immediatly, " \
+                                  "don't feed regular data in pipe")
                             continue
 
                         # serialize the data before acquiring the lock

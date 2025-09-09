@@ -1719,16 +1719,7 @@ class _TestQueue(BaseTestCase):
             p.join()
 
         self.assertEqual(len(results), n)
-        if q.empty():
-            self.assertEqual(results.count(pyqueue.ShutDown), n-size)
-        else:
-            from multiprocessing import reduction
-            x = reduction.ForkingPickler.loads(q._recv_bytes())
-            support.print_warning(f"This data {x} is into the pipe currently,"
-                                  " but not present when shut down."
-                                  " This was due to buffer/pipe delay"
-                                  " of transfer. This can happen, rarely"
-                                 )
+        self.assertEqual(results.count(pyqueue.ShutDown), n-size)
         close_queue(q)
 
     @classmethod
@@ -1817,6 +1808,33 @@ class _TestQueue(BaseTestCase):
         self.assertEqual(len(results), n)
         self.assertEqual(results.count("PSV"), 1)
         close_queue(q)
+
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
+    def queue_shutdown_immediate_purge_buffer(self):
+        if self.TYPE != 'processes':
+            self.skipTest(f'test not appropriate for {self.TYPE}')
+
+        logger = multiprocessing.get_logger()
+        original_level = logger.level
+        logger.setLevel(logging.DEBUG)
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        logging_format = '[%(levelname)s] [%(filename)s] %(message)s'
+        handler.setFormatter(logging.Formatter(logging_format))
+        logger.addHandler(handler)
+
+        try:
+            q = self.JoinableQueue()
+            for i in range(1000):
+                q.put("data")
+            q.shutdown(immediate=True)
+            q.join()
+            log_record = stream.getvalue()
+            self.assertIn("don't feed regular data in pipe", log_record)
+        finally:
+            logger.setLevel(original_level)
+            logger.removeHandler(handler)
+            handler.close()
 
     @classmethod
     def _shutdown(cls, q, immediate, results, retcode):
