@@ -1495,6 +1495,7 @@ class _TestQueue(BaseTestCase):
 
         with self.assertRaises(RuntimeError):
             q.shutdown(immediate=False)
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1512,6 +1513,7 @@ class _TestQueue(BaseTestCase):
             q.put("data")
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1532,7 +1534,7 @@ class _TestQueue(BaseTestCase):
         self.assertEqual(q.get(), "D")
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
-        self.assertTrue(q.empty())
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1556,10 +1558,14 @@ class _TestQueue(BaseTestCase):
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
         self.assertFalse(q.full())
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_queue_shutdown_immediate_notempty(self):
+        # when queue shuts down immediatly, all datas inserted
+        # into the pipe or into the buffer are erased.
+        # The queue must be empty.
         if self.TYPE != 'processes':
             self.skipTest(f'test not appropriate for {self.TYPE}')
 
@@ -1569,11 +1575,12 @@ class _TestQueue(BaseTestCase):
 
         self.assertFalse(q.full())
         q.shutdown(immediate=True)
+        self.assertTrue(q.empty())
         self.assertTrue(q._is_shutdown())
 
-        self.assertTrue(q.empty())
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1588,11 +1595,12 @@ class _TestQueue(BaseTestCase):
 
         self.assertTrue(q.full())
         q.shutdown(immediate=True)
+        self.assertTrue(q.empty())
         self.assertTrue(q._is_shutdown())
 
-        self.assertTrue(q.empty())
         with self.assertRaises(pyqueue.ShutDown):
             q.get()
+
         close_queue(q)
 
     def _joinablequeue_shutdown_all_methods(self, immediate):
@@ -1603,6 +1611,8 @@ class _TestQueue(BaseTestCase):
         self._wait()
 
         q.shutdown(immediate)
+        if immediate:
+            self.assertTrue(q.empty())
         self.assertTrue(q._is_shutdown())
 
         with self.assertRaises(pyqueue.ShutDown):
@@ -1632,6 +1642,7 @@ class _TestQueue(BaseTestCase):
             with self.assertRaises(pyqueue.ShutDown):
                 q.get(True, 0.125)
         q.join()
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1643,7 +1654,6 @@ class _TestQueue(BaseTestCase):
         self._joinablequeue_shutdown_all_methods(immediate=True)
 
     def _start_processes_pending(self, n, target, args):
-        self.manager = multiprocessing.Manager()
         self.ps = []
         for i in range(n):
             self.ps.append(self.Process(target=target,
@@ -1672,7 +1682,7 @@ class _TestQueue(BaseTestCase):
         size = 2
         q = self.Queue(maxsize=size)
         results = multiprocessing.Manager().list()
-        n = 10
+        n = 30
         b = self.Barrier(n+1)
 
         self._start_processes_pending(n, target=self._pending_put,
@@ -1684,7 +1694,7 @@ class _TestQueue(BaseTestCase):
 
         self.assertEqual(q._sem_pending_putters.get_value(), n-size)
         self.assertEqual(q._sem_pending_getters.get_value(), 0)
-        q.shutdown(immediate=True)
+        q.shutdown(immediate=False)
         self.assertTrue(q._is_shutdown())
         for p in self.ps:
             p.join()
@@ -1692,6 +1702,7 @@ class _TestQueue(BaseTestCase):
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
         self.assertEqual(q._sem_pending_getters.get_value(), 0)
         self.assertEqual(len(results), n)
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1699,7 +1710,7 @@ class _TestQueue(BaseTestCase):
         if self.TYPE != 'processes':
             self.skipTest(f'test not appropriate for {self.TYPE}')
 
-        # Regardless of the value (true or false) of the immediate variable,
+        # Regardless of the value of the immediate variable,
         # the tests are identical.
         size = 5
         q = self.Queue(maxsize=size)
@@ -1714,12 +1725,15 @@ class _TestQueue(BaseTestCase):
         self._wait()
 
         q.shutdown(immediate=True)
+        self.assertTrue(q.empty())
         self.assertTrue(q._is_shutdown())
         for p in self.ps:
             p.join()
 
         self.assertEqual(len(results), n)
         self.assertEqual(results.count(pyqueue.ShutDown), n-size)
+
+        self.assertTrue(q.empty())
         close_queue(q)
 
     @classmethod
@@ -1739,17 +1753,16 @@ class _TestQueue(BaseTestCase):
 
         q = self.Queue()
         results = multiprocessing.Manager().list()
-        n = 8
+        n = 25
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_get,
                                       args=(q, b, results))
         b.wait()
         self._wait() # wait for all pending get processes to be blocked.
-
+        self.assertTrue(q.empty())
         self.assertEqual(q._sem_pending_getters.get_value(), n)
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
-        q.shutdown(immediate=True)
-        self._wait() # adding value as 'sentinel shutdown'.
+        q.shutdown(immediate=False)
         self.assertTrue(q._is_shutdown())
         for p in self.ps:
             p.join()
@@ -1757,6 +1770,7 @@ class _TestQueue(BaseTestCase):
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
         self.assertEqual(len(results), n)
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1766,7 +1780,7 @@ class _TestQueue(BaseTestCase):
 
         q = self.Queue()
         results = multiprocessing.Manager().list()
-        n = 8
+        n = 25
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_get,
                                       args=(q, b, results))
@@ -1774,6 +1788,7 @@ class _TestQueue(BaseTestCase):
         self._wait() # wait for all pending get processes to be blocked.
 
         q.shutdown(immediate=True)
+        self.assertTrue(q.empty())
         self._wait() # adding data as 'sentinel shutdown'.
         self.assertTrue(q._is_shutdown())
         for p in self.ps:
@@ -1781,6 +1796,8 @@ class _TestQueue(BaseTestCase):
 
         self.assertEqual(len(results), n)
         self.assertEqual(results.count(pyqueue.ShutDown), n)
+
+        self.assertTrue(q.empty())
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1789,11 +1806,11 @@ class _TestQueue(BaseTestCase):
             self.skipTest(f'test not appropriate for {self.TYPE}')
 
         q = self.Queue()
-        q.put("PSV")
+        q.put("AZ67")
         self._wait()
 
         results = multiprocessing.Manager().list()
-        n = 8
+        n = 25
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_get,
                                       args=(q, b, results))
@@ -1806,7 +1823,8 @@ class _TestQueue(BaseTestCase):
             p.join()
 
         self.assertEqual(len(results), n)
-        self.assertEqual(results.count("PSV"), 1)
+        self.assertEqual(results.count("AZ67"), 1)
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
@@ -1825,12 +1843,16 @@ class _TestQueue(BaseTestCase):
 
         try:
             q = self.JoinableQueue()
-            for i in range(1000):
-                q.put("data")
+            for i in range(1500):
+                q.put("tictoc")
             q.shutdown(immediate=True)
+            self.assertTrue(q.empty())
             q.join()
+
             log_record = stream.getvalue()
             self.assertIn("don't feed regular data in pipe", log_record)
+
+            close_queue(q)
         finally:
             logger.setLevel(original_level)
             logger.removeHandler(handler)
@@ -1867,10 +1889,12 @@ class _TestQueue(BaseTestCase):
 
         if immediate:
             self.assertEqual(len(results), 1)
+            self.assertTrue(q.empty())
         else:
             self.assertEqual(len(results), n+1)
             self.assertListEqual(results[1:], list(range(n)))
         self.assertEqual(results[0], return_process+immediate)
+
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
