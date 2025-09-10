@@ -121,11 +121,10 @@ class Queue(object):
         finally:
             sem.acquire()
 
-    def _release_pending_putters_and_raise(self):
+    def _release_pending_putters(self):
         with self._lock_shutdown:
             if not self._sem_pending_putters.locked():
                 self._sem.release()
-            raise ShutDown
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
@@ -139,7 +138,8 @@ class Queue(object):
                     raise Full
         finally:
             if self._is_shutdown():
-                self._release_pending_putters_and_raise()
+                self._release_pending_putters()
+                raise ShutDown
 
         with self._notempty:
             if self._thread is None:
@@ -147,11 +147,10 @@ class Queue(object):
             self._buffer.append(obj)
             self._notempty.notify()
 
-    def _release_pending_getters_and_raise(self):
+    def _release_pending_getters(self):
         with self._lock_shutdown:
             if not self._sem_pending_getters.locked():
                 self._put_sentinel()
-            raise ShutDown
 
     def get(self, block=True, timeout=None):
         if self._closed:
@@ -183,15 +182,16 @@ class Queue(object):
                         self._rlock.release()
         finally:
             if self._is_shutdown() and empty:
-                self._release_pending_getters_and_raise()
+                self._release_pending_getters()
+                raise ShutDown
 
         item = _ForkingPickler.loads(res)
         if self._is_shutdown() \
             and isinstance(item, _ShutdownSentinel):
             # A pending getter process is just unblocked,
             # we try to unblock a next one if exists.
-            # Raises an exception for this process.
-            self._release_pending_getters_and_raise()
+            self._release_pending_getters()
+            raise ShutDown
 
         return item
 
@@ -478,7 +478,8 @@ class JoinableQueue(Queue):
                     raise Full
         finally:
             if self._is_shutdown():
-                self._release_pending_putters_and_raise()
+                self._release_pending_putters()
+                raise ShutDown
 
         with self._notempty, self._cond:
             if self._thread is None:
