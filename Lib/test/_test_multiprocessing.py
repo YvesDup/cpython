@@ -1687,7 +1687,9 @@ class _TestQueue(BaseTestCase):
 
         self._start_processes_pending(n, target=self._pending_put,
                                       args=(q, b, results))
+        # Wait for all procesess start.
         b.wait()
+
         # to be sure that queue is full, and all 'n-size' others processes
         # are pending.
         self._wait()
@@ -1719,7 +1721,9 @@ class _TestQueue(BaseTestCase):
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_put,
                                       args=(q, b, results))
+        # Wait for all procesess start.
         b.wait()
+
         # We need to call _wait to be sure that queue is full,
         # and all others processes are pending.
         self._wait()
@@ -1757,8 +1761,12 @@ class _TestQueue(BaseTestCase):
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_get,
                                       args=(q, b, results))
+        # Wait for all procesess start.
         b.wait()
-        self._wait() # wait for all pending get processes to be blocked.
+
+        # wait for all pending get processes to be blocked.
+        self._wait()
+
         self.assertTrue(q.empty())
         self.assertEqual(q._sem_pending_getters.get_value(), n)
         self.assertEqual(q._sem_pending_putters.get_value(), 0)
@@ -1784,8 +1792,11 @@ class _TestQueue(BaseTestCase):
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_get,
                                       args=(q, b, results))
+        # Wait for all procesess start.
         b.wait()
-        self._wait() # wait for all pending get processes to be blocked.
+
+        # wait for all pending get processes to be blocked.
+        self._wait()
 
         q.shutdown(immediate=True)
         self.assertTrue(q.empty())
@@ -1814,8 +1825,11 @@ class _TestQueue(BaseTestCase):
         b = self.Barrier(n+1)
         self._start_processes_pending(n, target=self._pending_get,
                                       args=(q, b, results))
+        # Wait for all procesess start.
         b.wait()
-        self._wait() # wait for all pending get processes to be blocked.
+
+        # wait for all pending get processes to be blocked.
+        self._wait()
 
         q.shutdown(immediate=False)
         self.assertTrue(q._is_shutdown())
@@ -1828,7 +1842,7 @@ class _TestQueue(BaseTestCase):
         close_queue(q)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
-    def queue_shutdown_immediate_purge_buffer(self):
+    def queue_shutdown_immediate_check_purge_buffer(self):
         if self.TYPE != 'processes':
             self.skipTest(f'test not appropriate for {self.TYPE}')
 
@@ -1850,7 +1864,7 @@ class _TestQueue(BaseTestCase):
             q.join()
 
             log_record = stream.getvalue()
-            self.assertIn("don't feed regular data in pipe", log_record)
+            self.assertIn("don't feed regular data to pipe", log_record)
 
             close_queue(q)
         finally:
@@ -1882,7 +1896,9 @@ class _TestQueue(BaseTestCase):
         return_process = 1000
         p = self.Process(target=self._shutdown,
                          args=(q, immediate, results,
-                              return_process+immediate))
+                              return_process+immediate
+                              )
+                        )
         p.start()
         q.join()
         p.join()

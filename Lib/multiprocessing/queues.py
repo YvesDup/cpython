@@ -47,12 +47,11 @@ class Queue(object):
             self._wlock = ctx.Lock()
         self._sem = ctx.BoundedSemaphore(maxsize)
 
-
         self._lock_shutdown = ctx.Lock()
         # Cannot use a ctx.Value because 'ctypes' library is
         # not always available on all Linux platforms.
-        # Using Semaphores instead of heap.BufferWrapper
-        # as an array of int is more explicit.
+        # Use of Semaphores instead of an array from `heap.BufferWrapper'
+        # is here more efficient and explicit.
         self._sem_flag_shutdown = ctx.Semaphore(0)
         self._sem_flag_shutdown_immediate = ctx.Semaphore(0)
         self._sem_pending_getters = ctx.Semaphore(0)
@@ -63,14 +62,6 @@ class Queue(object):
         self._reset()
         if sys.platform != 'win32':
             register_after_fork(self, Queue._after_fork)
-
-    def _is_shutdown(self):
-        return not self._sem_flag_shutdown.locked()
-
-    def _set_shutdown(self, immediate=False):
-        self._sem_flag_shutdown.release()
-        if immediate:
-            self._sem_flag_shutdown_immediate.release()
 
     def __getstate__(self):
         context.assert_spawning(self)
@@ -106,6 +97,14 @@ class Queue(object):
         self._send_bytes = self._writer.send_bytes
         self._recv_bytes = self._reader.recv_bytes
         self._poll = self._reader.poll
+
+    def _is_shutdown(self):
+        return not self._sem_flag_shutdown.locked()
+
+    def _set_shutdown(self, immediate=False):
+        self._sem_flag_shutdown.release()
+        if immediate:
+            self._sem_flag_shutdown_immediate.release()
 
     @contextmanager
     def _handle_pending_processes(self, sem):
@@ -189,7 +188,7 @@ class Queue(object):
         if self._is_shutdown() \
             and isinstance(item, _ShutdownSentinel):
             # A pending getter process is just unblocked,
-            # we try to unblock a next one if exists.
+            # Unblock a next one if exists.
             self._release_pending_getters()
             raise ShutDown
 
@@ -220,7 +219,7 @@ class Queue(object):
         # When put a sentinel into an empty queue,
         # dont forget to call to _sem.acquire in order to
         # maintain a correct count of acquire/release
-        #calls for BoudedSempaphore.
+        # calls for BoudedSempaphore.
         self._sem.acquire()
 
         with self._notempty:
@@ -248,13 +247,13 @@ class Queue(object):
             self._set_shutdown(immediate)
 
             # Shut down is immediatly and there is no pending getter,
-            # we purge the queue (pipe). If data is into the buffer and
-            # not into pipe, the 'put' thread should erase remaining data.
+            # we purge the queue (pipe). If there are datas into the buffer
+            # the 'feeder' thread should erase all of them.
             if immediate and not is_pending_getters:
                 self._clear()
 
             # Starting release one pending getter process.
-            # Put a first shutdown sentinel into the pipe.
+            # Put a first shutdown sentinel data into the pipe.
             if self.empty() and is_pending_getters:
                 self._put_sentinel()
 
@@ -386,12 +385,12 @@ class Queue(object):
                             writer_close()
                             return
 
-                        # When queue shuts down immediatly, don`t insert
+                        # When queue shuts down immediatly, do not insert
                         # regular data in pipe, only shutdown sentinel.
                         if is_shutdown_immediate() \
                             and not isinstance(obj, _ShutdownSentinel):
                             debug("Queue shuts down immediatly, " \
-                                  "don't feed regular data in pipe")
+                                  "don't feed regular data to pipe")
                             continue
 
                         # serialize the data before acquiring the lock
@@ -504,7 +503,8 @@ class JoinableQueue(Queue):
         super()._clear()
 
         # Data could be in the buffer, not in the pipe.
-        # Call acquire until Semaphore counter is zero.
+        # Call acquire method of '_unfinished_tasks' Semaphore
+        # until counter is zero.
         with self._cond:
             while not self._unfinished_tasks.locked():
                 self._unfinished_tasks.acquire(block=False)
