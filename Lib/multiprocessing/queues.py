@@ -18,8 +18,8 @@ import types
 import weakref
 import errno
 
-from queue import Empty, Full
-import queue
+from queue import Empty, Full, SimpleQueue as ThreadSimpleQueue
+
 
 from . import connection
 from . import context
@@ -68,11 +68,6 @@ class Queue(object):
         self._reset(after_fork=True)
 
     def _reset(self, after_fork=False):
-        if after_fork:
-            self._notempty._at_fork_reinit()
-        else:
-            self._notempty = threading.Condition(threading.Lock())
-        self._buffer = collections.deque()
         self._thread = None
         self._jointhread = None
         self._joincancelled = False
@@ -82,7 +77,7 @@ class Queue(object):
         self._recv_bytes = self._reader.recv_bytes
         self._poll = self._reader.poll
 
-        self._simplequeue_put = queue.SimpleQueue()
+        self._feed_queue = ThreadSimpleQueue()
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
@@ -92,14 +87,7 @@ class Queue(object):
 
         if self._thread is None:
             self._start_thread()
-        self._simplequeue_put.put(obj)
-        return
-
-        with self._notempty:
-            if self._thread is None:
-                self._start_thread()
-            self._buffer.append(obj)
-            self._notempty.notify()
+        self._feed_queue.put(obj)
 
     def get(self, block=True, timeout=None):
         if self._closed:
@@ -184,7 +172,7 @@ class Queue(object):
         # Start thread which transfers data from buffer to pipe
         self._thread = threading.Thread(
             target=Queue._new_feed,
-            args=(self._simplequeue_put, self._send_bytes,
+            args=(self._feed_queue, self._send_bytes,
                   self._wlock, self._reader.close, self._writer.close,
                   self._ignore_epipe, self._on_queue_feeder_error,
                   self._sem),
@@ -212,7 +200,7 @@ class Queue(object):
         # Send sentinel to the thread queue object when garbage collected
         self._close = Finalize(
             self, Queue._new_finalize_close,
-            [self._simplequeue_put],
+            [self._feed_queue],
             exitpriority=10
         )
         return
@@ -241,9 +229,9 @@ class Queue(object):
             notempty.notify()
 
     @staticmethod
-    def _new_finalize_close(simplequeue_put):
+    def _new_finalize_close(local_queue):
         debug('telling queue thread to quit')
-        simplequeue_put.put(_sentinel)
+        local_queue.put(_sentinel)
 
     @staticmethod
     def _feed(buffer, notempty, send_bytes, writelock, reader_close,
@@ -309,7 +297,7 @@ class Queue(object):
                     onerror(e, obj)
 
     @staticmethod
-    def _new_feed(simplequeue_put, send_bytes, writelock, reader_close,
+    def _new_feed(local_queue, send_bytes, writelock, reader_close,
               writer_close, ignore_epipe, onerror, queue_sem):
         debug('starting thread to feed data to pipe')
         sentinel = _sentinel
@@ -336,7 +324,7 @@ class Queue(object):
 
         while True:
             try:
-                obj = simplequeue_put.get()
+                obj = local_queue.get()
                 if obj is sentinel:
                     debug('feeder thread got sentinel -- exiting')
                     reader_close()
@@ -422,16 +410,8 @@ class JoinableQueue(Queue):
         with self._cond:
             if self._thread is None:
                 self._start_thread()
-            self._simplequeue_put.put(obj)
+            self._feed_queue.put(obj)
             self._unfinished_tasks.release()
-
-        return
-        with self._notempty, self._cond:
-            if self._thread is None:
-                self._start_thread()
-            self._buffer.append(obj)
-            self._unfinished_tasks.release()
-            self._notempty.notify()
 
     def task_done(self):
         with self._cond:

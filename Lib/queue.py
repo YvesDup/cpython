@@ -7,6 +7,7 @@ from heapq import heappush, heappop
 from time import monotonic as time
 try:
     from _queue import SimpleQueue
+    print("Module SimpleQueue")
 except ImportError:
     SimpleQueue = None
 
@@ -380,4 +381,5 @@ class _PySimpleQueue:
 
 
 if SimpleQueue is None:
+    print("local SimpleQueue")
     SimpleQueue = _PySimpleQueue
