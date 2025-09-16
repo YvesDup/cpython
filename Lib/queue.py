@@ -6,7 +6,7 @@ from collections import deque
 from heapq import heappush, heappop
 from time import monotonic as time
 try:
-    from _queue import SimpleQueue
+    from _queue import SimpleQueueSS
     print("Module SimpleQueue")
 except ImportError:
     SimpleQueue = None
