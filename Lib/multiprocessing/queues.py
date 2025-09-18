@@ -241,18 +241,18 @@ class Queue(object):
 
                 # serialize the data before acquiring the lock
                 obj = _ForkingPickler.dumps(obj)
-                """
-                _send_bytes(obj)
-                """
                 if wacquire is None:
                     send_bytes(obj)
                 else:
+                    """
+                    with writelock:
+                        send_bytes(obj)
+                    """
                     wacquire()
                     try:
                         send_bytes(obj)
                     finally:
                         wrelease()
-                """"""
 
             except Exception as e:
                 if ignore_epipe and getattr(e, 'errno', 0) == errno.EPIPE:
