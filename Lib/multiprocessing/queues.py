@@ -219,16 +219,20 @@ class Queue(object):
         debug('telling queue thread to quit')
         local_queue.put(_sentinel)
 
+
     @staticmethod
     def _new_feed(local_queue, send_bytes, writelock, reader_close,
               writer_close, ignore_epipe, onerror, queue_sem):
         debug('starting thread to feed data to pipe')
+        def _nop():
+            pass
         sentinel = _sentinel
         if sys.platform != 'win32':
             wacquire = writelock.acquire
             wrelease = writelock.release
         else:
-            wacquire = None
+            wacquire = _noo
+            wrelease = _nop
 
         while True:
             try:
@@ -241,18 +245,16 @@ class Queue(object):
 
                 # serialize the data before acquiring the lock
                 obj = _ForkingPickler.dumps(obj)
+                """
                 if wacquire is None:
                     send_bytes(obj)
                 else:
-                    """
-                    with writelock:
-                        send_bytes(obj)
-                    """
-                    wacquire()
-                    try:
-                        send_bytes(obj)
-                    finally:
-                        wrelease()
+                """
+                wacquire()
+                try:
+                    send_bytes(obj)
+                finally:
+                    wrelease()
 
             except Exception as e:
                 if ignore_epipe and getattr(e, 'errno', 0) == errno.EPIPE:
