@@ -49,7 +49,6 @@ class Queue(object):
         # For use by concurrent.futures
         self._ignore_epipe = False
         self._reset()
-
         if sys.platform != 'win32':
             register_after_fork(self, Queue._after_fork)
 
@@ -77,7 +76,7 @@ class Queue(object):
         self._recv_bytes = self._reader.recv_bytes
         self._poll = self._reader.poll
 
-        self._feed_queue = ThreadSimpleQueue()
+        self._feed_queue = None
 
     def put(self, obj, block=True, timeout=None):
         if self._closed:
@@ -170,6 +169,7 @@ class Queue(object):
         debug('Queue._start_thread()')
 
         # Start thread which transfers data from buffer to pipe
+        self._feed_queue = ThreadSimpleQueue()
         self._thread = threading.Thread(
             target=Queue._new_feed,
             args=(self._feed_queue, self._send_bytes,
