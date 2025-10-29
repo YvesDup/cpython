@@ -231,7 +231,7 @@ class Queue(object):
             wacquire = writelock.acquire
             wrelease = writelock.release
         else:
-            wacquire = _noo
+            wacquire = _nop
             wrelease = _nop
 
         while True:
