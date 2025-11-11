@@ -1081,7 +1081,7 @@ class Thread:
     def _delete(self):
         "Remove current thread from the dict of currently running threads."
         with _active_limbo_lock:
-            del _active[get_ident()]
+            _active.pop(get_ident(), None)
             # There must not be any python code between the previous line
             # and after the lock is released.  Otherwise a tracing function
             # could try to acquire the lock again in the same thread, (in
