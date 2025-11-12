@@ -930,7 +930,6 @@ class Thread:
         if _HAVE_THREAD_NATIVE_ID:
             self._native_id = None
         self._os_thread_handle = _ThreadHandle()
-        self._started = Event()
         self._initialized = True
         # Copy of sys.stderr used by self._invoke_excepthook()
         self._stderr = _sys.stderr
@@ -940,7 +939,6 @@ class Thread:
 
     def _after_fork(self, new_ident=None):
         # Private!  Called by threading._after_fork().
-        self._started._at_fork_reinit()
         if new_ident is not None:
             # This thread is alive.
             self._ident = new_ident
@@ -955,7 +953,7 @@ class Thread:
     def __repr__(self):
         assert self._initialized, "Thread.__init__() was not called"
         status = "initial"
-        if self._started.is_set():
+        if self._os_thread_handle.is_running():
             status = "started"
         if self._os_thread_handle.is_done():
             status = "stopped"
@@ -978,7 +976,7 @@ class Thread:
         if not self._initialized:
             raise RuntimeError("thread.__init__() not called")
 
-        if self._started.is_set():
+        if self._os_thread_handle.is_running():
             raise RuntimeError("threads can only be started once")
 
         with _active_limbo_lock:
@@ -1001,7 +999,6 @@ class Thread:
             with _active_limbo_lock:
                 del _limbo[self]
             raise
-        self._started.wait()  # Will set ident and native_id
 
     def run(self):
         """Method representing the thread's activity.
@@ -1061,7 +1058,6 @@ class Thread:
             if _HAVE_THREAD_NATIVE_ID:
                 self._set_native_id()
             self._set_os_name()
-            self._started.set()
             with _active_limbo_lock:
                 _active[self._ident] = self
                 del _limbo[self]
@@ -1113,7 +1109,7 @@ class Thread:
         """
         if not self._initialized:
             raise RuntimeError("Thread.__init__() not called")
-        if not self._started.is_set():
+        if not self._os_thread_handle.is_running():
             raise RuntimeError("cannot join thread before it is started")
         if self is current_thread():
             raise RuntimeError("cannot join current thread")
@@ -1176,7 +1172,7 @@ class Thread:
 
         """
         assert self._initialized, "Thread.__init__() not called"
-        return self._started.is_set() and not self._os_thread_handle.is_done()
+        return self._os_thread_handle.is_running() and not self._os_thread_handle.is_done()
 
     @property
     def daemon(self):
@@ -1199,7 +1195,7 @@ class Thread:
             raise RuntimeError("Thread.__init__() not called")
         if daemonic and not _daemon_threads_allowed():
             raise RuntimeError('daemon threads are disabled in this interpreter')
-        if self._started.is_set():
+        if self._os_thread_handle.is_running():
             raise RuntimeError("cannot set daemon status of active thread")
         self._daemonic = daemonic
 
@@ -1385,7 +1381,6 @@ class _MainThread(Thread):
 
     def __init__(self):
         Thread.__init__(self, name="MainThread", daemon=False)
-        self._started.set()
         self._ident = _get_main_thread_ident()
         self._os_thread_handle = _make_thread_handle(self._ident)
         if _HAVE_THREAD_NATIVE_ID:
@@ -1433,7 +1428,6 @@ class _DummyThread(Thread):
     def __init__(self):
         Thread.__init__(self, name=_newname("Dummy-%d"),
                         daemon=_daemon_threads_allowed())
-        self._started.set()
         self._set_ident()
         self._os_thread_handle = _make_thread_handle(self._ident)
         if _HAVE_THREAD_NATIVE_ID:
@@ -1443,7 +1437,7 @@ class _DummyThread(Thread):
         _DeleteDummyThreadOnDel(self)
 
     def is_alive(self):
-        if not self._os_thread_handle.is_done() and self._started.is_set():
+        if not self._os_thread_handle.is_done() and self._os_thread_handle.is_running():
             return True
         raise RuntimeError("thread is not alive")
 
