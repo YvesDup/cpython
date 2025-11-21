@@ -2103,11 +2103,12 @@ thread_PyThread_start_joinable_thread(PyObject *module, PyObject *fargs,
         return NULL;
     }
 
+    // gh-140746: catch memory error before thread really start
     PyThreadHandleObject *thread_handle = PyThreadHandleObject_CAST(hobj);
     PyEvent_Wait(&thread_handle->handle->thread_is_bootstraped);
     if (get_thread_handle_state(thread_handle->handle) == THREAD_HANDLE_FAILED) {
         PyErr_SetString(PyExc_RuntimeError,
-                        "Call to _bootstrap/_bootstrap_inner failed");
+                        "call to _bootstrap/_bootstrap_inner failed");
         Py_DECREF(hobj);
         return NULL;
     }
