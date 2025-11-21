@@ -2102,6 +2102,16 @@ thread_PyThread_start_joinable_thread(PyObject *module, PyObject *fargs,
         Py_DECREF(hobj);
         return NULL;
     }
+
+    PyThreadHandleObject_wait_bootstraped(hobj, NULL);
+    if (get_thread_handle_state(PyThreadHandleObject_CAST(hobj)->handle) == THREAD_HANDLE_FAILED) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "_bootstrap/_Bootstrap inner failed");
+        Py_DECREF(hobj);
+        return NULL;
+    }
+
+
     return (PyObject *) hobj;
 }
 

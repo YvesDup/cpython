@@ -997,17 +997,14 @@ class Thread:
                                    daemon=self.daemon)
         except Exception:
             with _active_limbo_lock:
-                del _limbo[self]
-            raise
-        self._os_thread_handle.wait_bootstraped()
-
-        # It's possible that the _bootstrap(_inner) fails in the new Thread (e.g. Memory Error);
-        # We have to clean `_limbo` and `_active` here to avoid inconsistent state as much as possible
-        if self._os_thread_handle.is_failed():
-            with _active_limbo_lock:
                 _limbo.pop(self, None)
                 if self._ident:
                     _active.pop(self._ident, None)
+            raise
+
+        # It's possible that the _bootstrap(_inner) fails in the new Thread (e.g. Memory Error);
+        # We have to clean `_limbo` and `_active` here to avoid inconsistent state as much as possible
+        # if self._os_thread_handle.is_failed():
 
     def run(self):
         """Method representing the thread's activity.
