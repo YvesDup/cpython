@@ -2103,6 +2103,7 @@ thread_PyThread_start_joinable_thread(PyObject *module, PyObject *fargs,
         return NULL;
     }
 
+    /**/
     // gh-140746: catch memory error before thread really start
     PyThreadHandleObject *thread_handle = PyThreadHandleObject_CAST(hobj);
     PyEvent_Wait(&thread_handle->handle->thread_is_bootstraped);
@@ -2112,7 +2113,7 @@ thread_PyThread_start_joinable_thread(PyObject *module, PyObject *fargs,
         Py_DECREF(hobj);
         return NULL;
     }
-
+    /**/
 
     return (PyObject *) hobj;
 }
