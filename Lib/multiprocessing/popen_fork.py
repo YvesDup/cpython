@@ -19,23 +19,10 @@ class Popen(object):
         self.returncode = None
         self.finalizer = None
         self._exit_condition = threading.Condition()
-        self._exit_blockers = 0
         self._launch(process_obj)
 
     def duplicate_for_child(self, fd):
         return fd
-
-    def poll_old(self, flag=os.WNOHANG):
-        if self.returncode is None:
-            try:
-                pid, sts = os.waitpid(self.pid, flag)
-            except OSError:
-                # Child process not yet created. See #1731717
-                # e.errno == errno.ECHILD == 10
-                return None
-            if pid == self.pid:
-                self.returncode = os.waitstatus_to_exitcode(sts)
-        return self.returncode
 
     def poll(self, flag=os.WNOHANG):
         with self._exit_condition:
@@ -53,18 +40,13 @@ class Popen(object):
             # Child process doesn't exist because it hasn't started yet (see
             # bpo-1731717) or has already been awaited on a racing thread (see
             # gh-130895)
-#            print(f'OSError {self.pid=} vs {pid=}')
             pass
 
         with self._exit_condition:
             if pid == self.pid:
-#                print(f'bye there {pid=}.....')
                 return self._set_returncode(sts)
 
-#            print(f"wait {self.pid=} vs {pid=} / {self.returncode=} / {self._exit_blockers=}")
-            self._exit_condition.wait_for(lambda: self.returncode is not None) # \
-                                            # or self._exit_blockers == 0)
-#            print(f"\tend of wait wait {self.pid=} vs {pid=} / {self.returncode=}")
+            self._exit_condition.wait_for(lambda: self.returncode is not None)
             return self.returncode
 
     def _nonblocking_poll(self, flag):
@@ -77,7 +59,6 @@ class Popen(object):
                 self._set_returncode(sts)
         except OSError:
             # See comments in the poll(...) except clause above
-#            print('OSError non blocking ....')
             pass
 
         # We may be racing with a blocking wait call, in which case (if we lose
