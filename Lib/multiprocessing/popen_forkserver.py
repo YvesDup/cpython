@@ -33,7 +33,7 @@ class Popen(popen_fork.Popen):
 
     def __init__(self, process_obj):
         self._fds = []
-        self._lock = threading.Lock():
+        self._lock = threading.Lock()
 
         super().__init__(process_obj)
 
