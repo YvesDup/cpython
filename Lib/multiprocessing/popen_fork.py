@@ -19,6 +19,8 @@ class Popen(object):
         self.returncode = None
         self.finalizer = None
         self._exit_condition = threading.Condition()
+        self._exit_blockers = 0
+        self._logs = []
         self._launch(process_obj)
 
     def duplicate_for_child(self, fd):
@@ -27,9 +29,11 @@ class Popen(object):
     def poll(self, flag=os.WNOHANG):
         with self._exit_condition:
             if self.returncode is not None:
+                self._logs.append('r')
                 return self.returncode
             if flag & os.WNOHANG == os.WNOHANG:
                 return self._nonblocking_poll(flag)
+            self._exit_blockers += 1
 
         # We have released the lock, so may be racing with blocking &
         # non-blocking calls at this point...
@@ -43,11 +47,28 @@ class Popen(object):
             pass
 
         with self._exit_condition:
+            self._exit_blockers -= 1
+            if self.returncode is not None:
+                self._logs.append('r')
+                return self.returncode
+            self._logs.append('F')
             if pid == self.pid:
-                return self._set_returncode(sts)
+                self._set_returncode(sts)
+            elif self._exit_blockers == 0:
+                self._exit_condition.notify_all()
+                self._logs.append('N')
 
-            self._exit_condition.wait_for(lambda: self.returncode is not None)
-            return self.returncode
+            save_returncode = self.returncode
+            while self.returncode is None and self._exit_blockers > 0:
+                self._logs.append('w')
+                self._exit_condition.wait()
+            """
+            self._exit_condition.wait_for(lambda: self.returncode is not None
+                                        or self._exit_blockers == 0
+                                        )
+            """
+            self._logs.append('R')
+        return self.returncode
 
     def _nonblocking_poll(self, flag):
         assert self._exit_condition._is_owned()
@@ -65,12 +86,15 @@ class Popen(object):
         # the race) it is arbitrary whether this returns None or the exit code
         # (if there is one): calling code must always be prepared to handle a
         # situation where this method returns None but the process has ended.
+        self._logs.append('X')
         return self.returncode
 
     def _set_returncode(self, sts):
         assert self._exit_condition._is_owned()
         assert self.returncode is None
         self.returncode = os.waitstatus_to_exitcode(sts)
+        n = len(self._exit_condition._waiters)
+        self._logs.append('n'*n)
         self._exit_condition.notify_all()
 
     def wait(self, timeout=None):
