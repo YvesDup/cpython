@@ -11,6 +11,7 @@ __all__ = ['Popen']
 # Start child process using fork
 #
 
+ZERO = ord('0')
 class Popen(object):
     method = 'fork'
 
@@ -31,7 +32,7 @@ class Popen(object):
             if self.returncode is not None:
                 self._logs.append('r')
                 return self.returncode
-            if flag & os.WNOHANG == os.WNOHANG:
+            if flag & os.WNOHANG:
                 return self._nonblocking_poll(flag)
             self._exit_blockers += 1
 
@@ -47,6 +48,7 @@ class Popen(object):
             pass
 
         with self._exit_condition:
+            self._logs.append(chr(ZERO + self._exit_blockers))
             self._exit_blockers -= 1
             if self.returncode is not None:
                 self._logs.append('r')
@@ -54,9 +56,13 @@ class Popen(object):
             self._logs.append('F')
             if pid == self.pid:
                 self._set_returncode(sts)
-            elif self._exit_blockers == 0:
+            if self._exit_blockers == 0:
+                n = len(self._exit_condition._waiters)
+                if n > 0:
+                    self._logs.append('N'*n)
+                else:
+                    self._logs.append('!N')
                 self._exit_condition.notify_all()
-                self._logs.append('N')
 
             save_returncode = self.returncode
             while self.returncode is None and self._exit_blockers > 0:
@@ -67,7 +73,10 @@ class Popen(object):
                                         or self._exit_blockers == 0
                                         )
             """
-            self._logs.append('R')
+            if self.returncode is not None:
+                self._logs.append('R')
+            else:
+                self._logs.append('0')
         return self.returncode
 
     def _nonblocking_poll(self, flag):
@@ -92,9 +101,13 @@ class Popen(object):
     def _set_returncode(self, sts):
         assert self._exit_condition._is_owned()
         assert self.returncode is None
+        self._logs.append('s')
         self.returncode = os.waitstatus_to_exitcode(sts)
         n = len(self._exit_condition._waiters)
-        self._logs.append('n'*n)
+        if n > 0:
+            self._logs.append('n'*n)
+        else:
+            self._logs.append('!n')
         self._exit_condition.notify_all()
 
     def wait(self, timeout=None):
