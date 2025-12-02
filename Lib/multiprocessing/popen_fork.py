@@ -11,7 +11,6 @@ __all__ = ['Popen']
 # Start child process using fork
 #
 
-ZERO = ord('0')
 class Popen(object):
     method = 'fork'
 
@@ -48,15 +47,14 @@ class Popen(object):
             pass
 
         with self._exit_condition:
-            self._logs.append(chr(ZERO + self._exit_blockers))
+            #self._logs.append(f'-{self._exit_blockers}-')
             self._exit_blockers -= 1
             if self.returncode is not None:
                 self._logs.append('r')
                 return self.returncode
-            self._logs.append('F')
             if pid == self.pid:
                 self._set_returncode(sts)
-            if self._exit_blockers == 0:
+            elif self._exit_blockers == 0: # forcing th test changing the elif to if
                 n = len(self._exit_condition._waiters)
                 if n > 0:
                     self._logs.append('N'*n)
@@ -64,15 +62,10 @@ class Popen(object):
                     self._logs.append('!N')
                 self._exit_condition.notify_all()
 
-            save_returncode = self.returncode
             while self.returncode is None and self._exit_blockers > 0:
                 self._logs.append('w')
                 self._exit_condition.wait()
-            """
-            self._exit_condition.wait_for(lambda: self.returncode is not None
-                                        or self._exit_blockers == 0
-                                        )
-            """
+
             if self.returncode is not None:
                 self._logs.append('R')
             else:
