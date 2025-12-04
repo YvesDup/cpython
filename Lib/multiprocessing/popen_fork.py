@@ -49,9 +49,11 @@ class Popen(object):
         with self._exit_condition:
             #self._logs.append(f'-{self._exit_blockers}-')
             self._exit_blockers -= 1
+            """"""
             if self.returncode is not None:
                 self._logs.append('r')
                 return self.returncode
+            """"""
             if pid == self.pid:
                 self._set_returncode(sts)
             elif self._exit_blockers == 0: # forcing th test changing the elif to if
@@ -63,13 +65,16 @@ class Popen(object):
                 self._exit_condition.notify_all()
 
             while self.returncode is None and self._exit_blockers > 0:
-                self._logs.append('w')
+                if self.returncode is not None:
+                    self._logs.append('w')
+                else:
+                    self._logs.append('W')
                 self._exit_condition.wait()
 
             if self.returncode is not None:
-                self._logs.append('R')
+                self._logs.append('r')
             else:
-                self._logs.append('0')
+                self._logs.append('R')
         return self.returncode
 
     def _nonblocking_poll(self, flag):
@@ -88,13 +93,15 @@ class Popen(object):
         # the race) it is arbitrary whether this returns None or the exit code
         # (if there is one): calling code must always be prepared to handle a
         # situation where this method returns None but the process has ended.
-        self._logs.append('X')
+        if self.returncode is not None:
+            self._logs.append('x')
+        else:
+            self._logs.append('X')
         return self.returncode
 
     def _set_returncode(self, sts):
         assert self._exit_condition._is_owned()
         assert self.returncode is None
-        self._logs.append('s')
         self.returncode = os.waitstatus_to_exitcode(sts)
         n = len(self._exit_condition._waiters)
         if n > 0:
