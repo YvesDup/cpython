@@ -388,6 +388,7 @@ class Server(object):
                         "Without callable, must have one non-keyword argument")
                 obj = args[0]
             else:
+                #kwds.update({'_manager': self})
                 obj = callable(*args, **kwds)
 
             if exposed is None:
@@ -1029,10 +1030,15 @@ class Value(object):
     def __init__(self, typecode, value, lock=True):
         self._typecode = typecode
         self._value = value
+        self._lock = lock
     def get(self):
         return self._value
     def set(self, value):
         self._value = value
+    def get_lock(self):
+        return self._lock
+    def _set_lock(self, rlock):
+        self._lock = rlock
     def __repr__(self):
         return '%s(%r, %r)'%(type(self).__name__, self._typecode, self._value)
     value = property(get, set)
@@ -1151,11 +1157,25 @@ class NamespaceProxy(BaseProxy):
 
 
 class ValueProxy(BaseProxy):
-    _exposed_ = ('get', 'set')
+    _exposed_ = ('get', 'set', 'get_lock', '__enter__', '__exit__', '_set_lock')
+    def get_lock(self):
+        ret = self._callmethod('get_lock')
+        if ret in (True, None):
+            rlock = self._manager.RLock()
+            self._callmethod('_set_lock', (rlock,))
+            return rlock
+        return ret
     def get(self):
         return self._callmethod('get')
     def set(self, value):
         return self._callmethod('set', (value,))
+    def __enter__(self):
+        if isinstance(self.get_lock(), AcquirerProxy):
+            return self.get_lock().acquire(None)
+        return self
+    def __exit__(self, *args):
+        if isinstance(self.get_lock(), AcquirerProxy):
+            return self.get_lock().release()
     value = property(get, set)
 
     __class_getitem__ = classmethod(types.GenericAlias)
@@ -1279,6 +1299,7 @@ SyncManager.register('list', list, ListProxy)
 SyncManager.register('dict', dict, DictProxy)
 SyncManager.register('set', set, SetProxy)
 SyncManager.register('Value', Value, ValueProxy)
+SyncManager.register('_set_lock', Value, ValueProxy, create_method=True)
 SyncManager.register('Array', Array, ArrayProxy)
 SyncManager.register('Namespace', Namespace, NamespaceProxy)
 
