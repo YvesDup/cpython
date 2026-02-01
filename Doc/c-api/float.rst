@@ -87,7 +87,7 @@ Floating-Point Objects
    ``<math.h>`` header.
 
    .. deprecated:: 3.15
-      The macro is soft deprecated.
+      The macro is :term:`soft deprecated`.
 
 
 .. c:macro:: Py_NAN
@@ -99,6 +99,19 @@ Floating-Point Objects
    the C11 standard ``<math.h>`` header.
 
 
+.. c:macro:: Py_HUGE_VAL
+
+   Equivalent to :c:macro:`!INFINITY`.
+
+   .. deprecated:: 3.14
+      The macro is :term:`soft deprecated`.
+
+
+.. c:macro:: Py_MATH_E
+
+   The definition (accurate for a :c:expr:`double` type) of the :data:`math.e` constant.
+
+
 .. c:macro:: Py_MATH_El
 
    High precision (long double) definition of :data:`~math.e` constant.
@@ -106,11 +119,23 @@ Floating-Point Objects
    .. deprecated-removed:: 3.15 3.20
 
 
+.. c:macro:: Py_MATH_PI
+
+   The definition (accurate for a :c:expr:`double` type) of the :data:`math.pi` constant.
+
+
 .. c:macro:: Py_MATH_PIl
 
    High precision (long double) definition of :data:`~math.pi` constant.
 
    .. deprecated-removed:: 3.15 3.20
+
+
+.. c:macro:: Py_MATH_TAU
+
+   The definition (accurate for a :c:expr:`double` type) of the :data:`math.tau` constant.
+
+   .. versionadded:: 3.6
 
 
 .. c:macro:: Py_RETURN_NAN
@@ -128,6 +153,34 @@ Floating-Point Objects
    On most platforms, this is equivalent to the following::
 
       return PyFloat_FromDouble(copysign(INFINITY, sign));
+
+
+.. c:macro:: Py_IS_FINITE(X)
+
+   Return ``1`` if the given floating-point number *X* is finite,
+   that is, it is normal, subnormal or zero, but not infinite or NaN.
+   Return ``0`` otherwise.
+
+   .. deprecated:: 3.14
+      The macro is :term:`soft deprecated`.  Use :c:macro:`!isfinite` instead.
+
+
+.. c:macro:: Py_IS_INFINITY(X)
+
+   Return ``1`` if the given floating-point number *X* is positive or negative
+   infinity.  Return ``0`` otherwise.
+
+   .. deprecated:: 3.14
+      The macro is :term:`soft deprecated`.  Use :c:macro:`!isinf` instead.
+
+
+.. c:macro:: Py_IS_NAN(X)
+
+   Return ``1`` if the given floating-point number *X* is a not-a-number (NaN)
+   value.  Return ``0`` otherwise.
+
+   .. deprecated:: 3.14
+      The macro is :term:`soft deprecated`.  Use :c:macro:`!isnan` instead.
 
 
 Pack and Unpack functions

@@ -3,9 +3,6 @@ name: Reusable macOS
 on:
   workflow_call:
     inputs:
-      config_hash:
-        required: true
-        type: string
       free-threading:
         required: false
         type: boolean
@@ -31,7 +28,7 @@ jobs:
       PYTHONSTRICTEXTENSIONBUILD: 1
       TERM: linux
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         persist-credentials: false
     - name: Runner image version
