@@ -998,21 +998,8 @@ class Thread:
         except Exception:
             with _active_limbo_lock:
                 _limbo.pop(self, None)
-                if self._ident:
-                    _active.pop(self._ident, None)
+                _active.pop(self._ident, None)
             raise
-
-        # It's possible that the _bootstrap(_inner) fails in the new Thread
-        # (e.g. Memory Error): We have to clean `_limbo` and `_active` here
-        # to avoid inconsistent state as much as possible
-        '''
-        self._os_thread_handle.wait_bootstrapped()
-        if self._os_thread_handle.is_failed():
-            with _active_limbo_lock:
-                _limbo.pop(self, None)
-                if self._ident:
-                    _active.pop(self._ident, None)
-        '''
 
     def run(self):
         """Method representing the thread's activity.

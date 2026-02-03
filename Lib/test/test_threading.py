@@ -1303,7 +1303,7 @@ class ThreadTests(BaseTestCase):
         self.assertEqual(err, b"")
         self.assertIn(b"got the correct exception", out)
 
-    def notest_start_new_thread_failed(self):
+    def test_start_new_thread_failed(self):
         # gh-109746: if Python fails to start newly created thread
         # due to failure of underlying PyThread_start_new_thread() call,
         # its state should be removed from interpreter' thread states list
@@ -1316,7 +1316,9 @@ class ThreadTests(BaseTestCase):
             import resource
             import _thread
 
+            os_thread_handle = _thread._ThreadHandle()
             def f():
+                os_thread_handle.set_bootstraped()
                 print("shouldn't be printed")
 
             limits = resource.getrlimit(resource.RLIMIT_NPROC)
@@ -1324,7 +1326,7 @@ class ThreadTests(BaseTestCase):
             resource.setrlimit(resource.RLIMIT_NPROC, (0, hard))
 
             try:
-                handle = _thread.start_joinable_thread(f)
+                handle = _thread.start_joinable_thread(f, handle=os_thread_handle)
             except RuntimeError:
                 print('ok')
             else:
@@ -1458,36 +1460,24 @@ class ThreadTests(BaseTestCase):
         self.assertEqual(err, b"")
         self.assertEqual(out.strip(), b"Exiting...")
 
-    def notest_memory_error_bootstrap(self):
+    def test_memory_error_bootstrap(self):
         # gh-140746: Test that Thread.start() doesn't hang indefinitely if
         # the new thread fails (MemoryError) during its initialization
 
-        def serving_thread():
+        def nothing():
+            pass
 
-            def nothing():
-                pass
+        def _set_ident_error():
+            1/0
 
-            def _set_ident_memory_error():
-                raise MemoryError()
-
+        with support.catch_unraisable_exception(), self.assertRaises(RuntimeError):
             thread = threading.Thread(target=nothing)
-            with (
-                support.catch_unraisable_exception(),
-                mock.patch.object(thread, '_set_ident', _set_ident_memory_error),
-            ):
-                thread.start()
-                thread.join()
-                self.assertFalse(thread.is_alive())
-                self.assertFalse(thread in threading._limbo)
-                self.assertFalse(thread in threading._active)
-
-        serving_thread = threading.Thread(target=serving_thread)
-        serving_thread.start()
-        serving_thread.join(0.1)
-        self.assertFalse(serving_thread.is_alive())
-        self.assertFalse(serving_thread in threading._limbo)
-        self.assertFalse(serving_thread in threading._active)
-
+            thread._set_ident = _set_ident_error
+            thread.start()
+            thread.join()
+            self.assertFalse(thread.is_alive())
+            self.assertFalse(thread in threading._limbo)
+            self.assertFalse(thread in threading._active)
 
 class ThreadJoinOnShutdown(BaseTestCase):
 
