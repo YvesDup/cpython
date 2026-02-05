@@ -2080,8 +2080,8 @@ thread_PyThread_start_joinable_thread(PyObject *module, PyObject *fargs,
                     hobj) < 0) {
         return NULL;
     }
-
-    if (hobj == Py_None) {
+    int no_handle_arg = (hobj == Py_None);
+    if (no_handle_arg) {
         hobj = (PyObject *)PyThreadHandleObject_new(state->thread_handle_type);
         if (hobj == NULL) {
             return NULL;
@@ -2105,6 +2105,12 @@ thread_PyThread_start_joinable_thread(PyObject *module, PyObject *fargs,
 
     // gh-140746: catch error before thread really start
     PyThreadHandleObject *thread_handle = PyThreadHandleObject_CAST(hobj);
+    if (no_handle_arg) {
+        // If the handle is created by this function, we can be sure that the thread
+        // is not started before this point, so we can wait for the thread to be
+        // bootstraped before returning the handle to the user.
+        _PyEvent_Notify(&thread_handle->handle->thread_is_bootstraped);
+    }
     PyEvent_Wait(&thread_handle->handle->thread_is_bootstraped);
     if (get_thread_handle_state(thread_handle->handle) == THREAD_HANDLE_FAILED) {
         PyErr_SetString(ThreadError, "call to or in _bootstrap/_bootstrap_inner failed");

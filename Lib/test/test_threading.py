@@ -1316,9 +1316,7 @@ class ThreadTests(BaseTestCase):
             import resource
             import _thread
 
-            os_thread_handle = _thread._ThreadHandle()
             def f():
-                os_thread_handle.set_bootstraped()
                 print("shouldn't be printed")
 
             limits = resource.getrlimit(resource.RLIMIT_NPROC)
@@ -1326,7 +1324,7 @@ class ThreadTests(BaseTestCase):
             resource.setrlimit(resource.RLIMIT_NPROC, (0, hard))
 
             try:
-                handle = _thread.start_joinable_thread(f, handle=os_thread_handle)
+                handle = _thread.start_joinable_thread(f)
             except RuntimeError:
                 print('ok')
             else:
@@ -1460,9 +1458,10 @@ class ThreadTests(BaseTestCase):
         self.assertEqual(err, b"")
         self.assertEqual(out.strip(), b"Exiting...")
 
-    def test_memory_error_bootstrap(self):
+    def test_error_bootstrap(self):
         # gh-140746: Test that Thread.start() doesn't hang indefinitely if
-        # the new thread fails (MemoryError) during its initialization
+        # the new thread fails (MemoryError in the referenced issue)
+        # during its initialization
 
         def nothing():
             pass
