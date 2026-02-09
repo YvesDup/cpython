@@ -2035,7 +2035,7 @@ class _TestCondition(BaseTestCase):
             p.join()
 
     @classmethod
-    def _new_wait(cls, cond, delay):
+    def _new_wait(cls, cond, delay=None):
         with cond:
             cond.wait(delay)
 
@@ -2049,6 +2049,7 @@ class _TestCondition(BaseTestCase):
         # start some processes
         workers = []
         n = 5
+
         for i in range(n):
             p = self.Process(target=self._new_wait, args=(cond, 0.001))
             workers.append(p)
@@ -2057,16 +2058,18 @@ class _TestCondition(BaseTestCase):
         # Sempahore.locked() is equivalent to
         # Semaphore._semlock._is_zero()
         self.assertTrue(cond._sleeping_count.locked())
+        self.assertTrue(cond._woken_count.locked())
 
         for i in range(n):
-            p = self.Process(target=self._new_wait, args=(cond, None))
+            p = self.Process(target=self._new_wait, args=(cond,))
             workers.append(p)
             p.start()
         time.sleep(DELTA)
         self.assertFalse(cond._sleeping_count.locked())
+        self.assertTrue(cond._woken_count.locked())
+
         with cond:
             cond.notify_all()
-
         for p in workers:
             p.join()
 

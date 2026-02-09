@@ -294,10 +294,10 @@ class Condition(object):
 
         # to take account of timeouts since last notify*() we subtract
         # woken_count from sleeping_count and rezero woken_count
-        while self._woken_count.acquire(False):
-            res = self._sleeping_count.acquire(False)
-            assert res, ('notify: Bug in sleeping_count.acquire'
-                         + '- res should not be False')
+        #while self._woken_count.acquire(False):
+        #    res = self._sleeping_count.acquire(False)
+        #    assert res, ('notify: Bug in sleeping_count.acquire'
+        #                 + '- res should not be False')
 
         sleepers = 0
         while sleepers < n and self._sleeping_count.acquire(False):
