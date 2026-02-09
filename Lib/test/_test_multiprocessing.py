@@ -2034,6 +2034,42 @@ class _TestCondition(BaseTestCase):
 
             p.join()
 
+    @classmethod
+    def _new_wait(cls, cond, delay):
+        with cond:
+            cond.wait(delay)
+
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
+    def test_sleeping_count_with_tiny_timeout(self):
+        # See gh-69655.
+        if self.TYPE != 'processes':
+            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+
+        cond = self.Condition()
+        # start some processes
+        workers = []
+        n = 5
+        for i in range(n):
+            p = self.Process(target=self._new_wait, args=(cond, 0.001))
+            workers.append(p)
+            p.start()
+        time.sleep(DELTA)
+        # Sempahore.locked() is equivalent to
+        # Semaphore._semlock._is_zero()
+        self.assertTrue(cond._sleeping_count.locked())
+
+        for i in range(n):
+            p = self.Process(target=self._new_wait, args=(cond, None))
+            workers.append(p)
+            p.start()
+        time.sleep(DELTA)
+        self.assertFalse(cond._sleeping_count.locked())
+        with cond:
+            cond.notify_all()
+
+        for p in workers:
+            p.join()
+
 
 class _TestEvent(BaseTestCase):
 

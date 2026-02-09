@@ -270,12 +270,17 @@ class Condition(object):
         for i in range(count):
             self._lock.release()
 
+        to_notify = False
         try:
             # wait for notification or timeout
-            return self._wait_semaphore.acquire(True, timeout)
+            return (to_notify := self._wait_semaphore.acquire(True, timeout))
         finally:
-            # indicate that this thread has woken
-            self._woken_count.release()
+            if to_notify:
+                # indicate that this thread has woken
+                self._woken_count.release()
+            else:
+                # we timed out, so remove ourselves from the sleeping count
+                self._sleeping_count.acquire()
 
             # reacquire lock
             for i in range(count):
