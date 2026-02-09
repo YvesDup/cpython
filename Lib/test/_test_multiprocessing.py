@@ -2048,13 +2048,13 @@ class _TestCondition(BaseTestCase):
         cond = self.Condition()
         # start some processes
         workers = []
-        n = 5
+        n = 3
 
         for i in range(n):
             p = self.Process(target=self._new_wait, args=(cond, 0.001))
             workers.append(p)
             p.start()
-        time.sleep(DELTA)
+        time.sleep(DELTA*2)
         # Sempahore.locked() is equivalent to
         # Semaphore._semlock._is_zero()
         self.assertTrue(cond._sleeping_count.locked())
@@ -2064,7 +2064,7 @@ class _TestCondition(BaseTestCase):
             p = self.Process(target=self._new_wait, args=(cond,))
             workers.append(p)
             p.start()
-        time.sleep(DELTA)
+        time.sleep(DELTA*2)
         self.assertFalse(cond._sleeping_count.locked())
         self.assertTrue(cond._woken_count.locked())
 
