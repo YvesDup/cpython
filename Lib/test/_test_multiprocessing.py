@@ -2058,6 +2058,7 @@ class _TestCondition(BaseTestCase):
         for _ in range(n):
             p = self.Process(target=self._new_wait, args=(cond,))
             workers.append(p)
+            p.daemon = True
             p.start()
         time.sleep(DELTA*2)
         self.assertFalse(cond._sleeping_count.locked())
