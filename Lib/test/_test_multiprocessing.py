@@ -2046,21 +2046,16 @@ class _TestCondition(BaseTestCase):
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
 
         cond = self.Condition()
-        # start some processes
-        workers = []
         n = 3
-
-        for i in range(n):
-            p = self.Process(target=self._new_wait, args=(cond, 0.001))
-            workers.append(p)
-            p.start()
-        time.sleep(DELTA*2)
+        for _ in range(n):
+            self._new_wait(cond, 0.0)
         # Sempahore.locked() is equivalent to
         # Semaphore._semlock._is_zero()
         self.assertTrue(cond._sleeping_count.locked())
         self.assertTrue(cond._woken_count.locked())
 
-        for i in range(n):
+        workers = []
+        for _ in range(n):
             p = self.Process(target=self._new_wait, args=(cond,))
             workers.append(p)
             p.start()
