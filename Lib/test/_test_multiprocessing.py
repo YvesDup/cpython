@@ -2037,14 +2037,11 @@ class _TestCondition(BaseTestCase):
     @classmethod
     def _just_wait(cls, cond, sleeping, delay=None):
         sleeping.release()
-        pid = os.getpid()
         with cond:
-            print(f'wait on {pid}')
             cond.wait(delay)
-            print(f'end of wait on {pid}')
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
-    def test_sleeping_count_with_tiny_timeout(self):
+    def test_sleeping_count_invariant_when_elapsed_timeouts(self):
         # See gh-69655.
         if self.TYPE != 'processes':
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
@@ -2076,7 +2073,6 @@ class _TestCondition(BaseTestCase):
         self.assertTrue(cond._woken_count.locked())
 
         with cond:
-            print(f'notify from {os.getpid()}')
             cond.notify_all()
         for p in workers:
             p.join()
