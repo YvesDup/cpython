@@ -2035,9 +2035,13 @@ class _TestCondition(BaseTestCase):
             p.join()
 
     @classmethod
-    def _new_wait(cls, cond, delay=None):
+    def _just_wait(cls, cond, sleeping, delay=None):
+        sleeping.release()
+        pid = os.getpid()
         with cond:
+            print(f'wait on {pid}')
             cond.wait(delay)
+            print(f'end of wait on {pid}')
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_sleeping_count_with_tiny_timeout(self):
@@ -2046,9 +2050,11 @@ class _TestCondition(BaseTestCase):
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
 
         cond = self.Condition()
+        sleeping = self.Semaphore(0)
         n = 3
         for _ in range(n):
-            self._new_wait(cond, 0.0)
+            with cond:
+                cond.wait(0.0)
         # Sempahore.locked() is equivalent to
         # Semaphore._semlock._is_zero()
         self.assertTrue(cond._sleeping_count.locked())
@@ -2056,15 +2062,21 @@ class _TestCondition(BaseTestCase):
 
         workers = []
         for _ in range(n):
-            p = self.Process(target=self._new_wait, args=(cond,))
-            workers.append(p)
+            p = self.Process(target=self._just_wait, args=(cond, sleeping))
             p.daemon = True
+            workers.append(p)
             p.start()
-        time.sleep(DELTA*2)
+
+        # Wait for starting of all processes.
+        for _ in range(n):
+            sleeping.acquire()
+
+        time.sleep(DELTA)
         self.assertFalse(cond._sleeping_count.locked())
         self.assertTrue(cond._woken_count.locked())
 
         with cond:
+            print(f'notify from {os.getpid()}')
             cond.notify_all()
         for p in workers:
             p.join()
