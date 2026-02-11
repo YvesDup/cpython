@@ -1,0 +1,2 @@
+Fix pickling error in the cProfile module when using ``multiprocessing.Process``
+script, which can not be properly pickled and executed.
