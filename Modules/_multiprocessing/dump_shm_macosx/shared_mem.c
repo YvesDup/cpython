@@ -64,22 +64,22 @@ puts(__func__);
     if (sem == SEM_FAILED) {
         errno = 0;
         // Semaphore exists, just opens it.
-        printf("Try to open glock '%s'\n", shm_semlock_counters.name_shm_lock);
-        sem = sem_open(shm_semlock_counters.name_shm_lock, 0);
+        printf("Try to open glock '%s'\n", shm_semlock_counters.name_glock);
+        sem = sem_open(shm_semlock_counters.name_glock, 0);
         // Not exists, creates it.
         if (force_open && sem == SEM_FAILED) {
-            sem = sem_open(shm_semlock_counters.name_shm_lock, O_CREAT, 0600, 1);
+            sem = sem_open(shm_semlock_counters.name_glock, O_CREAT, 0600, 1);
         }
     }
     printf("sem:%p\n", sem);
-    shm_semlock_counters.handle_shm_lock = sem;
+    shm_semlock_counters.handle_glock = sem;
 
     if (call_release_lock) {
-        RELEASE_SHM_LOCK;
+        RELEASE_GLOCK;
     }
 
     // Locks to semaphore.
-    ACQUIRE_SHM_LOCK;
+    ACQUIRE_GLOCK;
     printf("Shm Lock ok on %p\n", sem);
     // connect to Shared mem
     shm = shm_open(shm_semlock_counters.name_shm, oflag, 0);
@@ -110,7 +110,7 @@ puts(__func__);
     } else {
         printf("The shared memory '%s' does not exist\n", shm_semlock_counters.name_shm);
     }
-    RELEASE_SHM_LOCK;
+    RELEASE_GLOCK;
     printf("Shm Unlock ok on %p\n", sem);
 
 }
@@ -120,7 +120,7 @@ void _delete_shm_semlock_counters(int unlink) {
     puts("clean up...");
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
         if (shm_semlock_counters.counters) {
-            ACQUIRE_SHM_LOCK; 
+            ACQUIRE_GLOCK; 
             // unmmap
             munmap(shm_semlock_counters.counters,
                     shm_semlock_counters.header->size_shm);
@@ -128,13 +128,13 @@ void _delete_shm_semlock_counters(int unlink) {
                 shm_unlink(shm_semlock_counters.name_shm);
             }
             shm_semlock_counters.state_this = THIS_CLOSED;
-            RELEASE_SHM_LOCK;
+            RELEASE_GLOCK;
         }
     }
     // close lock
-    sem_close(shm_semlock_counters.handle_shm_lock);
+    sem_close(shm_semlock_counters.handle_glock);
     if (unlink) {
-        sem_unlink(shm_semlock_counters.name_shm_lock);
+        sem_unlink(shm_semlock_counters.name_glock);
     }
 }
 

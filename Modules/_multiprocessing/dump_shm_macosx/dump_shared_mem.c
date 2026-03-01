@@ -14,8 +14,8 @@ CountersWorkaround shm_semlock_counters = {
     .state_this = THIS_NOT_OPEN,
     .name_shm = SHAREDMEM_NAME,
     .handle_shm = (MEMORY_HANDLE)0,
-    .name_shm_lock = GLOCK_NAME,
-    .handle_shm_lock = (SEM_HANDLE)0,
+    .name_glock = GLOCK_NAME,
+    .handle_glock = (SEM_HANDLE)0,
     .header = (HeaderObject *)NULL,
     .counters = (CounterObject *)NULL,
 };
@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
         memset(&save, '\0', sizeof(save));
         do {
-            ACQUIRE_SHM_LOCK;
+            ACQUIRE_GLOCK;
             if (memcmp(&save, shm_semlock_counters.header, sizeof(HeaderObject)) ) {
                 time_t timestamp = time(NULL);
                 puts(ctime(&timestamp));
@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
                 memcpy(&save, shm_semlock_counters.header, sizeof(HeaderObject));
                 puts("==========");
             }
-            RELEASE_SHM_LOCK;
+            RELEASE_GLOCK;
             usleep(udelay);
         } while(repeat--);
     }

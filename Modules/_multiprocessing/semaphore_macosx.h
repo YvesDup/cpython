@@ -51,8 +51,8 @@ typedef struct {
     int state_this;           // State of this structure.
     char *name_shm;
     MEMORY_HANDLE handle_shm; // Memory handle.
-    char *name_shm_lock;
-    SEM_HANDLE handle_shm_lock; // Global memory lock to handle shared memory.
+    char *name_glock;
+    SEM_HANDLE handle_glock; // Global memory lock to handle shared memory.
     /*-- Pointers to shared memory --*/
     HeaderObject *header;     // Pointer to header (shared memory).
     CounterObject*counters;   // Pointer to the first item of fixed array (shared memory).
@@ -75,17 +75,17 @@ typedef struct {
                                                             m); \
                                             } while(0);
 
-    #define LOG_SHM_LOCK(m)      fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
-    #define ACQUIRE_SHM_LOCK     (LOG_SHM_LOCK("ACQ_GLOCK") && acquire_lock(shm_semlock_counters.handle_shm_lock) == 0)
-    #define RELEASE_SHM_LOCK     (LOG_SHM_LOCK("\tREL_GLOCK") && release_lock(shm_semlock_counters.handle_shm_lock) == 0)
+    #define LOG_GLOCK(m)      fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
+    #define ACQUIRE_GLOCK     (LOG_GLOCK("ACQ_GLOCK") && acquire_lock(shm_semlock_counters.handle_glock) == 0)
+    #define RELEASE_GLOCK     (LOG_GLOCK("\tREL_GLOCK") && release_lock(shm_semlock_counters.handle_glock) == 0)
 
     #define LOG_LOCK(m, h)       fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
     #define ACQUIRE_COUNTER_MUTEX(h) (LOG_LOCK("acq", h) && acquire_lock((h)) == 0)
     #define RELEASE_COUNTER_MUTEX(h) (LOG_LOCK("\trel", h) && release_lock((h)) == 0)
 #else
     #define DEBUG_PID_FUNC(n, h, c, m)  1
-    #define ACQUIRE_SHM_LOCK  (acquire_lock(shm_semlock_counters.handle_shm_lock) == 0)
-    #define RELEASE_SHM_LOCK  (release_lock(shm_semlock_counters.handle_shm_lock) == 0)
+    #define ACQUIRE_GLOCK  (acquire_lock(shm_semlock_counters.handle_glock) == 0)
+    #define RELEASE_GLOCK  (release_lock(shm_semlock_counters.handle_glock) == 0)
 
     #define ACQUIRE_COUNTER_MUTEX(h) (acquire_lock((h)) == 0)
     #define RELEASE_COUNTER_MUTEX(h) (release_lock((h)) == 0)

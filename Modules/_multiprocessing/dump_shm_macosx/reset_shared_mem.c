@@ -14,8 +14,8 @@ CountersWorkaround shm_semlock_counters = {
     .state_this = THIS_NOT_OPEN,
     .name_shm = SHAREDMEM_NAME,
     .handle_shm = (MEMORY_HANDLE)0,
-    .name_shm_lock = GLOCK_NAME,
-    .handle_shm_lock = (SEM_HANDLE)0,
+    .name_glock = GLOCK_NAME,
+    .handle_glock = (SEM_HANDLE)0,
     .header = (HeaderObject *)NULL,
     .counters = (CounterObject *)NULL,
 };
@@ -27,7 +27,7 @@ static void reset_shm_semlock_counters(int size, int nb_slots) {
 puts(__func__);
 
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
-        ACQUIRE_SHM_LOCK;
+        ACQUIRE_GLOCK;
         CounterObject *counter = shm_semlock_counters.counters;
         HeaderObject *header = shm_semlock_counters.header;
         dump_shm_semlock_header_counters();
@@ -48,7 +48,7 @@ puts(__func__);
         header->n_slots = CALC_NB_SLOTS(header->size_shm);
         header->n_procs = 0;
         dump_shm_semlock_header();
-        RELEASE_SHM_LOCK;
+        RELEASE_GLOCK;
     }
 }
 
