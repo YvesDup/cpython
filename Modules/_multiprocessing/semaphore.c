@@ -533,6 +533,7 @@ connect_glock_and_lock(const char *sem_name)
     return 1;
 }
 
+/*-------
 static int
 _create_glock_and_lock(const char *sem_name)
 {
@@ -550,6 +551,7 @@ _create_glock_and_lock(const char *sem_name)
     return 0;
 }
 
+
 static int
 _connect_glock_and_lock(const char *sem_name)
 {
@@ -566,6 +568,7 @@ _connect_glock_and_lock(const char *sem_name)
     shm_semlock_counters.handle_glock = sem;
     return 0;
 }
+---- */
 
 static int
 delete_glock(void)
@@ -702,12 +705,13 @@ create_shm_semlock_counters(const char *from_sem_name)
     }
     return res;
 }
-
+/*-------
 #ifdef HAVE_SYS_MMAN_H
 #  include <sys/mman.h>           // shm_open(), shm_unlink()
 #endif
 
-/* From posixshmem.c file */
+
+// From posixshmem.c file
 static int
 _shm_open(char *name, int flags, int mode)
 {
@@ -769,9 +773,9 @@ _create_shm_semlock_counters(const char *from_sem_name) {
                             shm_semlock_counters.handle_shm,
                             0L);
     if (datas != MAP_FAILED) {
-        /* Header */
+        // Header 
         shm_semlock_counters.header = (HeaderObject *)datas;
-        /* First slot of array */
+        // First slot of array 
         shm_semlock_counters.counters = (CounterObject *)(datas + sizeof(HeaderObject));
         header = shm_semlock_counters.header;
 
@@ -783,7 +787,7 @@ _create_shm_semlock_counters(const char *from_sem_name) {
 
         ++header->n_procs;
 
-        /* Initialization is successful. */
+        // Initialization is successful.
         shm_semlock_counters.state_this = THIS_AVAILABLE;
     } else {
         res = -1;
@@ -829,15 +833,15 @@ _connect_shm_semlock_counters(const char *from_sem_name)
                             shm_semlock_counters.handle_shm,
                             0L);
     if (datas != MAP_FAILED) {
-        /* Header */
+        // Header
         shm_semlock_counters.header = (HeaderObject *)datas;
-        /* First slot of array */
+        // First slot of array 
         shm_semlock_counters.counters = (CounterObject *)(datas + sizeof(HeaderObject));
         header = shm_semlock_counters.header;
 
         ++header->n_procs;
 
-        /* Initialization is successful. */
+        // Initialization is successful.
         shm_semlock_counters.state_this = THIS_AVAILABLE;
     } else {
         res = -1;
@@ -848,7 +852,7 @@ _connect_shm_semlock_counters(const char *from_sem_name)
     RELEASE_GLOCK;
     return res;
 }
-
+-------------*/
 
 /*
 Build name of mutex associated with each Semaphore.
@@ -1342,7 +1346,6 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
     SemLockObject *semlock = NULL;
     SEM_HANDLE handle_mutex = SEM_FAILED;
     CounterObject *counter = NULL;
-    char fail[256] = {0};
 #endif
 
     if (name != NULL) {
