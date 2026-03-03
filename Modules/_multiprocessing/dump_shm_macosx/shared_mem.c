@@ -16,16 +16,61 @@ void sigterm(int code) {
 }
 
 int acquire_lock(SEM_HANDLE sem) {
-    sem_wait(sem);
-    return 1;
+    if (sem_wait(sem) < 0) {
+        return -1;
+    }
+    return 0;
 }
 
 int release_lock(SEM_HANDLE sem) {
-    sem_post(sem);
-    return 1;
+    if (sem_post(sem) < 0) {
+        return -1;
+    }
+    return 0;
 }
 
-int exist_lock(SEM_HANDLE sem) {
+int
+exists_lock(SEM_HANDLE handle)
+{
+   int res = -1;
+   int err = 0;
+
+   if (handle == NULL || handle == SEM_FAILED) {
+        shm_semlock_counters.state_this = THIS_NOT_OPEN;
+        return 0;
+    }
+
+    errno = 0;
+    do {
+        res = sem_trywait(handle);
+        err = errno;
+    } while (res < 0 && errno == EINTR);
+
+    if (res < 0 && (errno == EBADF)) {
+        shm_semlock_counters.state_this = THIS_NOT_OPEN;
+        return 0;
+    }
+
+    errno = err;
+    if (res < 0 && errno == EAGAIN) {
+        // Couldn't acquire immediately, need to block
+        do {
+            res = sem_trywait(handle);
+            err = errno;
+        } while (res < 0 && errno == EINTR);
+    }
+
+    if (res == 0) {
+        if(sem_post(handle) < 0) {
+            return 0;
+        }
+        return 1;
+    }
+
+    return res < 0 && errno == EAGAIN ? 1 : 0;
+}
+
+int exist_lock_old(SEM_HANDLE sem) {
     int res = -1 ;
 
     errno = 0;
@@ -120,7 +165,7 @@ void _delete_shm_semlock_counters(int unlink) {
     puts("clean up...");
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
         if (shm_semlock_counters.counters) {
-            ACQUIRE_GLOCK; 
+            ACQUIRE_GLOCK;
             // unmmap
             munmap(shm_semlock_counters.counters,
                     shm_semlock_counters.header->size_shm);
