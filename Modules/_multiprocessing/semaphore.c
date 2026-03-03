@@ -366,6 +366,7 @@ Operations are:
 Datas for each process.
 */
 CountersWorkaround shm_semlock_counters = {
+    .shm_counters_mutex = {0},
     .state_this = THIS_NOT_OPEN,
     .name_shm = SHAREDMEM_NAME,
     .handle_shm = (MEMORY_HANDLE)0,
@@ -1250,14 +1251,17 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     semlock = _SemLockObject_CAST(result);
     if (ISSEMAPHORE(semlock)) {
+        PyMutex_Lock(&shm_semlock_counters.shm_counters_mutex);
         if (!exists_lock(shm_semlock_counters.handle_glock) ||
             shm_semlock_counters.state_this != THIS_AVAILABLE) {
             DEBUG_PID_FUNC(name_copy, 0, counter, "LOCK NOT EXISTS IMPL");
             if (create_shm_semlock_counters(name) < 0) {
 //            if (_create_shm_semlock_counters(name) < 0) {
+                PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
                 goto failure;
             }
         }
+        PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
 
         // error is set in ACQUIRE/RELEASE_* macros.
         if (!ACQUIRE_GLOCK) // error set in acquire_lock function
@@ -1371,14 +1375,17 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     semlock = _SemLockObject_CAST(result);
     if (ISSEMAPHORE(semlock)) {
+        PyMutex_Lock(&shm_semlock_counters.shm_counters_mutex);
         if (!exists_lock(shm_semlock_counters.handle_glock) ||
             shm_semlock_counters.state_this != THIS_AVAILABLE) {
             DEBUG_PID_FUNC(name_copy, 0, counter, "LOCK NOT EXISTS REBUILD");
             if (create_shm_semlock_counters(name) < 0) {
 //            if (_connect_shm_semlock_counters(name) < 0) {
+                PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
                 goto failure;
             }
         }
+        PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
 
         if(!ACQUIRE_GLOCK) {
             goto failure;
@@ -1440,13 +1447,13 @@ semlock_dealloc(SemLockObject* self)
         SEM_CLOSE(self->handle);
     }
 
-    #ifdef HAVE_BROKEN_SEM_GETVALUE
+#ifdef HAVE_BROKEN_SEM_GETVALUE
     int res = -1;
     if (ISSEMAPHORE(self)) {
         if (self->handle_mutex != SEM_FAILED) {
             SEM_CLOSE(self->handle_mutex);
         }
-        /* Case of fork with MacOSX */
+
         ACQUIRE_GLOCK;
         DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "");
         if (self->created && self->counter) {

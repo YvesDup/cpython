@@ -48,6 +48,7 @@ enum _state {THIS_NOT_OPEN, THIS_AVAILABLE, THIS_CLOSED};
 
 typedef struct {
     /*-- global datas --*/
+    PyMutex shm_counters_mutex ; // Mutex to handle safely the shared memory counters.
     int state_this;           // State of this structure.
     char *name_shm;
     MEMORY_HANDLE handle_shm; // Memory handle.
