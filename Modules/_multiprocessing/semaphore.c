@@ -773,9 +773,9 @@ _create_shm_semlock_counters(const char *from_sem_name) {
                             shm_semlock_counters.handle_shm,
                             0L);
     if (datas != MAP_FAILED) {
-        // Header 
+        // Header
         shm_semlock_counters.header = (HeaderObject *)datas;
-        // First slot of array 
+        // First slot of array
         shm_semlock_counters.counters = (CounterObject *)(datas + sizeof(HeaderObject));
         header = shm_semlock_counters.header;
 
@@ -835,7 +835,7 @@ _connect_shm_semlock_counters(const char *from_sem_name)
     if (datas != MAP_FAILED) {
         // Header
         shm_semlock_counters.header = (HeaderObject *)datas;
-        // First slot of array 
+        // First slot of array
         shm_semlock_counters.counters = (CounterObject *)(datas + sizeof(HeaderObject));
         header = shm_semlock_counters.header;
 
