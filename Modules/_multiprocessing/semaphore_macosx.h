@@ -61,11 +61,11 @@ typedef struct {
 
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
 
-#define DEBUG_MACOSX_SEMAPHORE 0
+#define DEBUG_MACOSX_SEMAPHORE 1
 #if defined(Py_DEBUG) && DEBUG_MACOSX_SEMAPHORE == 1
     #define DEBUG_PID_FUNC(n, h, c, m)  do { \
-                                            fprintf(stderr, "%-40s: PID:%05d - HD:%lX - %s" \
-                                                            " c:%lX hdl:'%02lX' / %03d sems: %s \n", \
+                                            fprintf(stderr, "%-40s: PID:%05d - HD:%lX - %s," \
+                                                            " c:%lX - hdl:'%02lX' / %03d, sems: %s \n", \
                                                             __func__, \
                                                             getpid(), \
                                                             (unsigned long)shm_semlock_counters.header, \
@@ -76,20 +76,18 @@ typedef struct {
                                                             m); \
                                             } while(0);
 
-    #define LOG_GLOCK(m)      fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
-    #define ACQUIRE_GLOCK     (LOG_GLOCK("ACQ_GLOCK") && acquire_lock(shm_semlock_counters.handle_glock) == 0)
-    #define RELEASE_GLOCK     (LOG_GLOCK("\tREL_GLOCK") && release_lock(shm_semlock_counters.handle_glock) == 0)
-
-    #define LOG_LOCK(m, h)       fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
-    #define ACQUIRE_COUNTER_MUTEX(h) (LOG_LOCK("acq", h) && acquire_lock((h)) == 0)
-    #define RELEASE_COUNTER_MUTEX(h) (LOG_LOCK("\trel", h) && release_lock((h)) == 0)
+    #define LOG_GLOCK(m)      1 // fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
+    #define LOG_LOCK(m, h)    1 // fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
 #else
     #define DEBUG_PID_FUNC(n, h, c, m)  1
-    #define ACQUIRE_GLOCK  (acquire_lock(shm_semlock_counters.handle_glock) == 0)
-    #define RELEASE_GLOCK  (release_lock(shm_semlock_counters.handle_glock) == 0)
-
-    #define ACQUIRE_COUNTER_MUTEX(h) (acquire_lock((h)) == 0)
-    #define RELEASE_COUNTER_MUTEX(h) (release_lock((h)) == 0)
+    #define LOG_GLOCK(m)      1
+    #define LOG_LOCK(m, h)    1
 #endif
+
+#define EXIST_GLOCK       (LOG_GLOCK("EXIST_LOCK") > 0 && exist_lock(sem) == 0)
+#define ACQUIRE_GLOCK     (LOG_GLOCK("ACQ_GLOCK") > 0 && acquire_lock(shm_semlock_counters.handle_glock) == 0)
+#define RELEASE_GLOCK     (LOG_GLOCK("\tREL_GLOCK") > 0 && release_lock(shm_semlock_counters.handle_glock) == 0)
+#define ACQUIRE_COUNTER_MUTEX(h) (LOG_LOCK("acq", h) && acquire_lock((h)) == 0)
+#define RELEASE_COUNTER_MUTEX(h) (LOG_LOCK("\trel", h) && release_lock((h)) == 0)
 
 #endif /* SEMAPHORE_MACOSX_H */

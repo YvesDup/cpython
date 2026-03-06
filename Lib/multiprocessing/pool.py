@@ -580,6 +580,9 @@ class Pool(object):
             except (OSError, EOFError):
                 util.debug('result handler got EOFError/OSError -- exiting')
                 return
+            except Exception as e:
+                print(("result handler got exception while getting task: %s" % (e,)))
+                break
 
             if thread._state != RUN:
                 assert thread._state == TERMINATE, "Thread not in TERMINATE"
@@ -603,6 +606,10 @@ class Pool(object):
             except (OSError, EOFError):
                 util.debug('result handler got EOFError/OSError -- exiting')
                 return
+
+            except Exception as e:
+                print(("result handler got exception while getting task: %s" % (e,)))
+                continue
 
             if task is None:
                 util.debug('result handler ignoring extra sentinel')

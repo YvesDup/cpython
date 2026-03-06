@@ -7,6 +7,7 @@
 
 #include <semaphore.h> // sem_open
 typedef sem_t *SEM_HANDLE;
+typedef void *PyMutex;
 
 #include "../semaphore_macosx.h"
 #include "shared_mem.h"

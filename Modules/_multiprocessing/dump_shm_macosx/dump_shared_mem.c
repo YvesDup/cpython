@@ -5,12 +5,14 @@
 
 #include <semaphore.h> // sem_t
 typedef sem_t *SEM_HANDLE;
+typedef void *PyMutex;
 
 #include "../semaphore_macosx.h"
 #include "./shared_mem.h"
 
 // Static datas for each process.
 CountersWorkaround shm_semlock_counters = {
+    .shm_counters_mutex = {NULL},
     .state_this = THIS_NOT_OPEN,
     .name_shm = SHAREDMEM_NAME,
     .handle_shm = (MEMORY_HANDLE)0,
