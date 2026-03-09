@@ -1025,11 +1025,11 @@ remove_counter(CounterObject *counter)
 
     memset(counter, 0, sizeof(CounterObject));
     --shm_semlock_counters.header->n_semlocks;
-    /* ---
+    /* --- */
     if (shm_semlock_counters.header->n_semlocks == 0) {
         res = delete_shm_semlock_counters(false);
     }
-    -- */
+    /* -- */
     return res;
 }
 
@@ -1535,14 +1535,18 @@ semlock_dealloc(SemLockObject* self)
             SEM_CLOSE(self->handle_mutex);
         }
 
-        ACQUIRE_GLOCK;
-        DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "");
-        --self->counter->n_instances;
-        if (self->counter && (self->created || !self->counter->n_instances)) {
-            res = remove_counter(self->counter);
-            self->counter = NULL;
+        if (ACQUIRE_GLOCK) {
+            DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "");
+            if (self->counter) {
+                DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "decref counter");
+                --self->counter->n_instances;
+                if (!self->counter->n_instances) {
+                    res = remove_counter(self->counter);
+                    self->counter = NULL;
+                }
+            }
+            RELEASE_GLOCK;
         }
-        RELEASE_GLOCK;
         if (!res ) {
             delete_glock();
         }
