@@ -415,7 +415,7 @@ _get_constant_semlock(PyObject *self)
         Py_DECREF(py_shared_mem_name);
         return -1;
     }
-    PyObject *py_glock_mem_name = PyDict_GetItemString(semlock_type->tp_dict, 
+    PyObject *py_glock_mem_name = PyDict_GetItemString(semlock_type->tp_dict,
                                             "_MACOSX_GLOCK_NAME");
     if (py_glock_mem_name == NULL) {
         puts("Cannot get glock memory name from module");
