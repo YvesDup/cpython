@@ -1025,9 +1025,11 @@ remove_counter(CounterObject *counter)
 
     memset(counter, 0, sizeof(CounterObject));
     --shm_semlock_counters.header->n_semlocks;
+    /* ---
     if (shm_semlock_counters.header->n_semlocks == 0) {
         res = delete_shm_semlock_counters(false);
     }
+    -- */
     return res;
 }
 
