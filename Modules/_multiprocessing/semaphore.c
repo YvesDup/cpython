@@ -368,7 +368,7 @@ Datas for each process.
 char name_shm[SIZE_SEM_NAME] = {0};
 char name_glock[SIZE_MUTEX_NAME] = {0};
 
-static CountersWorkaround
+static struct _CountersWorkaround
 shm_semlock_counters = {
     .shm_counters_mutex = {0},
     .state_this = THIS_NOT_OPEN,

@@ -47,7 +47,7 @@ enum _state {THIS_NOT_OPEN, THIS_AVAILABLE, THIS_CLOSED};
 #define SHAREDMEM_NAME  "/psm_gh125828"
 #define GLOCK_NAME      "/mp_gh125828"
 
-typedef struct _CountersWorkaround{
+struct _CountersWorkaround{
     /*-- global datas --*/
     PyMutex shm_counters_mutex ; // Mutex to handle safely the shared memory counters.
     int state_this;           // State of this structure.
@@ -58,7 +58,7 @@ typedef struct _CountersWorkaround{
     /*-- Pointers to shared memory --*/
     HeaderObject *header;     // Pointer to header (shared memory).
     CounterObject*counters;   // Pointer to the first item of fixed array (shared memory).
-}  CountersWorkaround;
+};
 
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
 
