@@ -47,7 +47,7 @@ enum _state {THIS_NOT_OPEN, THIS_AVAILABLE, THIS_CLOSED};
 #define SHAREDMEM_NAME  "/psm_gh125828"
 #define GLOCK_NAME      "/mp_gh125828"
 
-typedef struct {
+typedef struct _CountersWorkaround{
     /*-- global datas --*/
     PyMutex shm_counters_mutex ; // Mutex to handle safely the shared memory counters.
     int state_this;           // State of this structure.
