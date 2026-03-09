@@ -198,10 +198,9 @@ puts(__func__);
 
 void dump_shm_semlock_header(void) {
     if (shm_semlock_counters.state_this == THIS_AVAILABLE) {
-        printf("n sems:%d - n sem_slots:%d, n procs:%d, size_shm:%d\n", header->n_semlocks,
-                                                                        header->n_slots,
-                                                                        header->n_procs,
-                                                                        header->size_shm);
+        printf("n sems:%d - n sem_slots:%d, size_shm:%d\n", header->n_semlocks,
+                                                            header->n_slots,
+                                                            header->size_shm);
     }
 }
 

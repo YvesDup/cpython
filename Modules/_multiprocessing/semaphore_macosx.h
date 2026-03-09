@@ -24,15 +24,16 @@ typedef struct {
     int n_semlocks;   // Current number of semaphores. Starts 0.
     int n_slots;      // Current slots in the counter array.
     int size_shm;     // Size of allocated shared memory (this and N counters).
-    int n_procs;      // Number of attached processes (Used to check).
+    //int n_procs;      // Number of attached processes (Used to check).
 } HeaderObject;
 
-#define SIZE_SEM_NAME 24
+#define SIZE_SEM_NAME 16
 #define SIZE_MUTEX_NAME (SIZE_SEM_NAME<<1)
 
 typedef struct {
     char sem_name[SIZE_SEM_NAME];  // Name of semaphore.
     int internal_value; // Internal value of semaphore, update on each acquire/release.
+    int n_instances; // Number of SemLockObject linked to this CounterObject.
     time_t ctimestamp;  // Created timestamp (debug log).
 } CounterObject;
 
@@ -61,23 +62,23 @@ typedef struct {
 
 #define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
 
-#define DEBUG_MACOSX_SEMAPHORE 1
+#define DEBUG_MACOSX_SEMAPHORE 0
 #if defined(Py_DEBUG) && DEBUG_MACOSX_SEMAPHORE == 1
     #define DEBUG_PID_FUNC(n, h, c, m)  do { \
-                                            fprintf(stderr, "%-40s: PID:%05d - HD:%lX - %s," \
-                                                            " c:%lX - hdl:'%02lX' / %03d, sems: %s \n", \
+                                            fprintf(stdout, "%-40s - PID:%05d - (%s - hdl:'%02lX') - " \
+                                                            "[HD:%lX - c:%lX] - %03d sems - %s\n", \
                                                             __func__, \
                                                             getpid(), \
-                                                            (unsigned long)shm_semlock_counters.header, \
                                                             n, \
-                                                            (unsigned long)c, \
                                                             (unsigned long)h, \
+                                                            (unsigned long)shm_semlock_counters.header, \
+                                                            (unsigned long)c, \
                                                             shm_semlock_counters.header ? shm_semlock_counters.header->n_semlocks : 255, \
                                                             m); \
                                             } while(0);
 
-    #define LOG_GLOCK(m)      1 // fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
-    #define LOG_LOCK(m, h)    1 // fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
+    #define LOG_GLOCK(m)      fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
+    #define LOG_LOCK(m, h)    fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
 #else
     #define DEBUG_PID_FUNC(n, h, c, m)  1
     #define LOG_GLOCK(m)      1

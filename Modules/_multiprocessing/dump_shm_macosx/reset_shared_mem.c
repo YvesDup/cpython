@@ -47,7 +47,6 @@ puts(__func__);
         }
         header->n_semlocks = 0;
         header->n_slots = CALC_NB_SLOTS(header->size_shm);
-        header->n_procs = 0;
         dump_shm_semlock_header();
         RELEASE_GLOCK;
     }

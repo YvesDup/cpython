@@ -12,7 +12,7 @@ typedef void *PyMutex;
 
 // Static datas for each process.
 CountersWorkaround shm_semlock_counters = {
-    .shm_counters_mutex = {NULL},
+    .shm_counters_mutex = {0},
     .state_this = THIS_NOT_OPEN,
     .name_shm = SHAREDMEM_NAME,
     .handle_shm = (MEMORY_HANDLE)0,
@@ -28,9 +28,10 @@ CounterObject *counter =  NULL;
 #define MAX_SEMAPHORES_SHOW  32
 
 static char *show_counter(char *p, CounterObject *counter) {
-    sprintf(p, "p:%p, n:%s, v:%d, t:%s", counter,
+    sprintf(p, "p:%p, n:%s, v:%d, i:%d, t:%s", counter,
                                            counter->sem_name,
                                            counter->internal_value,
+                                           counter->n_instances,
                                            ctime(&counter->ctimestamp));
     return p;
 }
