@@ -1513,7 +1513,7 @@ semlock_dealloc(SemLockObject* self)
         semlock_impl as calls to semlock_dealloc
         In "spawn" start method, there are as calls to semlock_dealloc as
         calls to semlock_impl plus calls to semlock_rebuild.
-        Here, it's not possible to known to teh real start method. 
+        Here, it's not possible to known to teh real start method.
         So we have to search if sempahore already exists yet.
         */
         int n_opened_sems = -1;
@@ -1529,7 +1529,7 @@ semlock_dealloc(SemLockObject* self)
             if (self->counter->unlink == 1) {
                 n_opened_sems = remove_counter(self->counter);
                 DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "remove counter");
-            } 
+            }
             RELEASE_GLOCK;
             if (n_opened_sems == 0) {
                 delete_glock();
