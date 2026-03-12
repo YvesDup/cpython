@@ -32,9 +32,10 @@ typedef struct {
 
 typedef struct {
     char sem_name[SIZE_SEM_NAME];  // Name of semaphore.
-    int internal_value; // Internal value of semaphore, update on each acquire/release.
-    int n_instances; // Number of SemLockObject linked to this CounterObject.
-    time_t ctimestamp;  // Created timestamp (debug log).
+    short internal_value;     // Internal value of semaphore, update on each acquire/release.
+    short n_instances;        // Number of SemLockObject linked to this CounterObject.
+    short unlink;             // Flag to know if this CounterObject is unlink or not.
+    time_t ctimestamp;      // Created timestamp (debug log).
 } CounterObject;
 
 /*
@@ -77,15 +78,15 @@ struct _CountersWorkaround{
                                                             m); \
                                             } while(0);
 
-    #define LOG_GLOCK(m)      fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
-    #define LOG_LOCK(m, h)    fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
+    #define LOG_GLOCK(m)      1 // fprintf(stderr, "%s %s: %03d\n", m, __func__, __LINE__)
+    #define LOG_LOCK(m, h)    1 // fprintf(stderr, "%s(%02lX) %s: %03d\n", m, (unsigned long)h, __func__, __LINE__)
 #else
     #define DEBUG_PID_FUNC(n, h, c, m)  1
     #define LOG_GLOCK(m)      1
     #define LOG_LOCK(m, h)    1
 #endif
 
-#define EXIST_GLOCK       (LOG_GLOCK("EXIST_LOCK") > 0 && exist_lock(sem) == 0)
+#define EXIST_GLOCK       (LOG_GLOCK("EXIST_GLOCK") > 0 && exist_lock(shm_semlock_counters.handle_glock) == 1)
 #define ACQUIRE_GLOCK     (LOG_GLOCK("ACQ_GLOCK") > 0 && acquire_lock(shm_semlock_counters.handle_glock) == 0)
 #define RELEASE_GLOCK     (LOG_GLOCK("\tREL_GLOCK") > 0 && release_lock(shm_semlock_counters.handle_glock) == 0)
 #define ACQUIRE_COUNTER_MUTEX(h) (LOG_LOCK("acq", h) && acquire_lock((h)) == 0)
