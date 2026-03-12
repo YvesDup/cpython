@@ -380,6 +380,7 @@ shm_semlock_counters = {
     .counters = (CounterObject *)NULL,
 };
 
+/*
 static int
 _get_constant_semlock(PyObject *self)
 {
@@ -405,7 +406,6 @@ _get_constant_semlock(PyObject *self)
     Py_DECREF(semlock_type);
     return 0;
 
-    /* ---
     PyObject *py_shared_mem_name = PyDict_GetItemString(semlock_type->tp_dict,
                                             "_MACOSX_SHAREDMEM_NAME");
     if (py_shared_mem_name == NULL) {
@@ -432,8 +432,8 @@ _get_constant_semlock(PyObject *self)
         Py_DECREF(module);
     py_DECREF(py_name;
     Py_DECREF(semlock_type);
-    --- */
 }
+-- */
 
 /*
 SemLockObject with aditionnal members:
@@ -1517,7 +1517,7 @@ semlock_dealloc(SemLockObject* self)
         So we have to search if sempahore already exists yet.
         */
         int n_opened_sems = -1;
-        CounterObject *counter = NULL;
+        //CounterObject *counter = NULL;
 
         if (self->handle_mutex != SEM_FAILED) {
             SEM_CLOSE(self->handle_mutex);
