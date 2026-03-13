@@ -375,6 +375,8 @@ CountersWorkaround shm_semlock_counters = {
     .counters = (CounterObject *)NULL,
 };
 
+static PyMutex shm_counters_mutex = {0};
+
 /*
 SemLockObject with aditionnal members:
 + a mutex to handle safely the associated CounterObject.
@@ -422,6 +424,11 @@ static int
 exists_lock(SEM_HANDLE handle) {
    int res = -1;
    int err = 0;
+
+    if (handle == NULL || handle == SEM_FAILED) {
+        shm_semlock_counters.state_this = THIS_NOT_OPEN;
+        return 0;
+    }
 
     errno = 0;
     do {
@@ -558,6 +565,7 @@ connect_shm_lock_and_lock(const char *sem_name) {
 
 static int
 delete_shm_lock(void) {
+    // Note: caller must hold shm_counters_mutex
     int res = -1;
 
     if (shm_semlock_counters.handle_shm_lock != SEM_FAILED) {
@@ -1041,13 +1049,15 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     semlock = _SemLockObject_CAST(result);
     if (ISSEMAPHORE(semlock)) {
+        PyMutex_Lock(&shm_counters_mutex);
         if (!exists_lock(shm_semlock_counters.handle_shm_lock) ||
             shm_semlock_counters.state_this != THIS_AVAILABLE) {
             if (create_shm_semlock_counters(name) < 0) {
-
+                PyMutex_Unlock(&shm_counters_mutex);
                 goto failure;
             }
         }
+        PyMutex_Unlock(&shm_counters_mutex);
 
         // error is set in ACQUIRE/RELEASE_* macros.
         if (!ACQUIRE_SHM_LOCK) // error set in acquire_lock function
@@ -1163,13 +1173,16 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     semlock = _SemLockObject_CAST(result);
     if (ISSEMAPHORE(semlock)) {
+        PyMutex_Lock(&shm_counters_mutex);
         if (!exists_lock(shm_semlock_counters.handle_shm_lock) ||
             shm_semlock_counters.state_this != THIS_AVAILABLE) {
             if (create_shm_semlock_counters(name) < 0) {
+                PyMutex_Unlock(&shm_counters_mutex);
                 strcpy(fail, "create_shm_semlock_counters failed");
                 goto failure;
             }
         }
+        PyMutex_Unlock(&shm_counters_mutex);
 
         DEBUG_PID_FUNC(name_copy, 0, counter, "init");
         if(!ACQUIRE_SHM_LOCK) {
@@ -1246,6 +1259,7 @@ semlock_dealloc(SemLockObject* self)
             SEM_CLOSE(self->handle_mutex);
         }
         /* Case of fork with MacOSX */
+        PyMutex_Lock(&shm_counters_mutex);
         ACQUIRE_SHM_LOCK;
         DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "");
         if (self->created && self->counter) {
@@ -1256,6 +1270,7 @@ semlock_dealloc(SemLockObject* self)
         if (!res ) {
             delete_shm_lock();
         }
+        PyMutex_Unlock(&shm_counters_mutex);
     }
 #endif /* HAVE_BROKEN_SEM_GETVALUE */
 
@@ -1294,9 +1309,8 @@ _multiprocessing_SemLock__is_mine_impl(SemLockObject *self)
     return PyBool_FromLong(ISMINE(self));
 }
 
-PyObject * _multiprocessing_SemLock__is_zero_impl(SemLockObject *self);
-
 /*[clinic input]
+@critical_section
 _multiprocessing.SemLock._get_value
 
 Get the value of the semaphore.
@@ -1304,13 +1318,19 @@ Get the value of the semaphore.
 
 static PyObject *
 _multiprocessing_SemLock__get_value_impl(SemLockObject *self)
-/*[clinic end generated code: output=64bc1b89bda05e36 input=cb10f9a769836203]*/
+/*[clinic end generated code: output=64bc1b89bda05e36 input=b900f9766c864d35]*/
 {
     int sval = -1;
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (self->maxvalue <= 1) {
-        return PyLong_FromLong((long)Py_IsFalse(_multiprocessing_SemLock__is_zero_impl(self)));
+        PyObject *is_zero = _multiprocessing_SemLock__is_zero_impl(self);
+        if (is_zero == NULL) {
+            return NULL;
+        }
+        long val = (long)Py_IsFalse(is_zero);
+        Py_DECREF(is_zero);
+        return PyLong_FromLong(val);
     }
 
     // error is set in ACQUIRE/RELEASE_* macros.
@@ -1340,6 +1360,7 @@ _multiprocessing_SemLock__get_value_impl(SemLockObject *self)
 }
 
 /*[clinic input]
+@critical_section
 _multiprocessing.SemLock._is_zero
 
 Return whether semaphore has value zero.
@@ -1347,7 +1368,7 @@ Return whether semaphore has value zero.
 
 static PyObject *
 _multiprocessing_SemLock__is_zero_impl(SemLockObject *self)
-/*[clinic end generated code: output=815d4c878c806ed7 input=294a446418d31347]*/
+/*[clinic end generated code: output=815d4c878c806ed7 input=7401329b1f0f059c]*/
 {
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (sem_trywait(self->handle) < 0) {
