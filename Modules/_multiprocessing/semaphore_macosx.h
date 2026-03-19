@@ -10,7 +10,7 @@ Perharps, this value is to high ?
 */
 #define NSEMS_MAX               sysconf(_SC_SEM_NSEMS_MAX)
 
-#define CALC_SIZE_SHM           (NSEMS_MAX * sizeof(CounterObject)) + sizeof(HeaderObject);
+#define CALC_SIZE_SHM           (NSEMS_MAX * sizeof(CounterObject)) + sizeof(HeaderObject)
 
 #define SC_PAGESIZE             sysconf(_SC_PAGESIZE)
 #define ALIGN_SHM_PAGE(n)       ((int)((n)/SC_PAGESIZE)+1)*SC_PAGESIZE
@@ -24,7 +24,6 @@ typedef struct {
     int n_semlocks;   // Current number of semaphores. Starts 0.
     int n_slots;      // Current slots in the counter array.
     int size_shm;     // Size of allocated shared memory (this and N counters).
-    //int n_procs;      // Number of attached processes (Used to check).
 } HeaderObject;
 
 #define SIZE_SEM_NAME 16
@@ -33,7 +32,6 @@ typedef struct {
 typedef struct {
     char sem_name[SIZE_SEM_NAME];  // Name of semaphore.
     short internal_value;     // Internal value of semaphore, update on each acquire/release.
-    short n_instances;        // Number of SemLockObject linked to this CounterObject.
     short unlink;             // Flag to know if this CounterObject is unlink or not.
     time_t ctimestamp;      // Created timestamp (debug log).
 } CounterObject;
@@ -50,8 +48,6 @@ enum _state {THIS_NOT_OPEN, THIS_AVAILABLE, THIS_CLOSED};
 
 struct _CountersWorkaround{
     /*-- global datas --*/
-    PyMutex shm_counters_mutex ; // Mutex to handle safely the shared memory counters.
-    int state_this;           // State of this structure.
     char *name_shm;
     MEMORY_HANDLE handle_shm; // Memory handle.
     char *name_glock;
@@ -61,14 +57,16 @@ struct _CountersWorkaround{
     CounterObject*counters;   // Pointer to the first item of fixed array (shared memory).
 };
 
-#define ISSEMAPHORE(o) ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
+#define ISSEMAPHORE(o)                  ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
+#define ISSEMAPHORE_FROM_ARGS(m, k)     ((m) > 1 && (k) == SEMAPHORE)
 
-#define DEBUG_MACOSX_SEMAPHORE 0
+#define DEBUG_MACOSX_SEMAPHORE 1
 #if defined(Py_DEBUG) && DEBUG_MACOSX_SEMAPHORE == 1
     #define DEBUG_PID_FUNC(n, h, c, m)  do { \
-                                            fprintf(stdout, "%-40s - PID:%05d - (%s - hdl:'%02lX') - " \
+                                            fprintf(stdout, "%-40s(%4d) - " \
+                                                            "PID:%05d - (%s - hdl:'%02lX') - " \
                                                             "[HD:%lX - c:%lX] - %03d sems - %s\n", \
-                                                            __func__, \
+                                                            __func__, __LINE__, \
                                                             getpid(), \
                                                             n, \
                                                             (unsigned long)h, \

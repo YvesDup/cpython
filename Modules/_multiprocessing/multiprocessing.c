@@ -191,6 +191,8 @@ static PyMethodDef module_methods[] = {
  * Initialize
  */
 
+extern int _get_timestamp(void) ; // _multiprocesssing.h
+
 static int
 multiprocessing_exec(PyObject *module)
 {
@@ -229,43 +231,6 @@ multiprocessing_exec(PyObject *module)
         return -1;
     }
     Py_DECREF(py_sem_value_max);
-
-#ifdef HAVE_BROKEN_SEM_GETVALUE
-    #include "semaphore_macosx.h"
-
-    /* Here define the 2 variables for the workaround about `get_value` method with
-    the mac OSX semaphore. These variables, a shared memory and a lock must submit
-    to the resource tracker.
-    */
-    char *p = SHAREDMEM_NAME;
-    char buf[256];
-    PyOS_snprintf(buf, sizeof(buf), "%s_%04X", p, getpid());
-    PyObject *py_shared_mem_name = PyUnicode_FromStringAndSize(buf, strlen(buf));
-    if (py_shared_mem_name == NULL)
-        return -1;
-    if (PyDict_ContainsString(semlock_type->tp_dict, "_MACOSX_SHAREDMEM_NAME") == 0 &&
-        PyDict_SetItemString(semlock_type->tp_dict, "_MACOSX_SHAREDMEM_NAME",
-                            py_shared_mem_name) < 0) {
-        Py_DECREF(py_shared_mem_name);
-        return -1;
-    }
-    PyModule_AddStringConstant(module, "_MACOSX_SHAREDMEM_NAME", buf);
-    Py_DECREF(py_shared_mem_name);
-
-    p = GLOCK_NAME;
-    PyOS_snprintf(buf, sizeof(buf), "%s_%04X", p, getpid());
-    PyObject *py_glock_mem_name = PyUnicode_FromStringAndSize(buf, strlen(buf));
-    if (py_glock_mem_name == NULL)
-        return -1;
-    if (PyDict_ContainsString(semlock_type->tp_dict,  "_MACOSX_GLOCK_NAME") == 0 &&
-        PyDict_SetItemString(semlock_type->tp_dict, "_MACOSX_GLOCK_NAME",
-                            py_glock_mem_name) < 0) {
-        Py_DECREF(py_glock_mem_name);
-        return -1;
-    }
-    PyModule_AddStringConstant(module, "_MACOSX_GLOCK_NAME", buf);
-    Py_DECREF(py_glock_mem_name);
-#endif /* HAVE_BROKEN_SEM_GETVALUE*/
 
 #endif
 

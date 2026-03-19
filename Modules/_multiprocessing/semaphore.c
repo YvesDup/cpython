@@ -318,14 +318,13 @@ available for each processed.
 This internal value is stored in a structure named CounterObject with:
 + the referenced semaphore name,
 + the (internal) current value,
-+ a flag to reset counter when unlink/dealloc.
++ the unlink flag (case of "fork" start method),
 + a created timestamp.
 
 A header with 4 members is created to manage all the CounterObject in the shared memory.
-+ the count of CountedObject stored.
-+ the count of available slots.
++ the count of CountedObject stored,
++ the count of available slots,
 + the size of shared memory.
-+ the count of attached processes.
 
 With each Semaphore (SemLock) a mutex is created in order to avoid data races
 when the internal counter of CounterObject is updated.
@@ -345,19 +344,22 @@ When unlink is called, Semaphore and its associated mutex are unlink, CounterObj
 |                 |                |          |             |             |
 |  n_semlocks     | sem_name       |          |             |             |
 |  n_slots        | internal_value |          |             |             |
-|  size_shm       | n_instances    |          |             |             |
+|  size_shm       | unlink         |          |             |             |
 |                 | ctimestamp     |          |             |             |
 +-----------------+----------------+---/  /---+-------------+-------------+
 
 A dedicated lock is also created to control all operations with the shared memory.
 Operations are:
-+ create or connect shared mem.
-+ looking for a free slot.
-+ stored counter datas in a free slot.
-+ looking for a stored counter.
-+ remove counter datas.
++ create, connect to shared mem, remove it,
++ create and rebuild SemlockObject when link systemsem and counter),
++ manage counter datas as:
+    + looking for a free slot.
+    + stored counter datas in a free slot.
+    + looking for a stored counter.
+    + remove counter datas.
 
-*/
+--------------------------------*/
+
 // ------------- list of structures --------------
 
 #include "semaphore_macosx.h" // CounterObject, HeaderObject, CountersWorkaround
@@ -365,13 +367,9 @@ Operations are:
 /*
 Datas for each process.
 */
-char name_shm[SIZE_SEM_NAME] = {0};
-char name_glock[SIZE_MUTEX_NAME] = {0};
 
 static struct _CountersWorkaround
 shm_semlock_counters = {
-    .shm_counters_mutex = {0},
-    .state_this = THIS_NOT_OPEN,
     .name_shm = SHAREDMEM_NAME,
     .handle_shm = (MEMORY_HANDLE)0,
     .name_glock = GLOCK_NAME,
@@ -380,64 +378,81 @@ shm_semlock_counters = {
     .counters = (CounterObject *)NULL,
 };
 
-/*
+/* ---------------------------------*/
+/* unlink sem and shared mem from multiprocessing.resource_tracker
+module */
+
 static int
-_get_constant_semlock(PyObject *self)
+_register_resource_tracker_sem(void)
 {
-    return 0;
-    PyTypeObject *semlock_type = Py_TYPE(self);
-    if (semlock_type == NULL) {
+    PyObject *f_register = PyImport_ImportModuleAttrString("multiprocessing.resource_tracker",\
+                                                         "register");
+    if (f_register == NULL) {
+        PyErr_Clear();
+        puts("no import");
+        return -1;
+    }
+    PyObject *psem_name = PyUnicode_FromString(GLOCK_NAME);
+    if (psem_name == NULL) {
+        PyErr_Clear();
+        Py_DECREF(f_register);
+        puts("no sem name");
+        return -1;
+    }
+    PyObject *ptype_sem = PyUnicode_FromString("semaphore");
+    if (psem_name == NULL) {
+        Py_DECREF(f_register);
+        Py_DECREF(psem_name);
+        PyErr_Clear();
+        puts("no type name");
         return -1;
     }
 
-    PyObject *module = PyType_GetModule(semlock_type);
-    if (module == NULL) {
+    PyObject *ret = PyObject_CallFunctionObjArgs(f_register, psem_name, ptype_sem, NULL);
+    Py_DECREF(psem_name);
+    Py_DECREF(ptype_sem);
+    Py_DECREF(f_register);
+    if (ret == NULL) {
+        PyErr_Clear();
+        puts("no call to register");
         return -1;
     }
-
-    PyObject *py_name = PyObject_GetAttrString(module, "_MACOSX_SHAREDMEM_NAME");
-    if (py_name == NULL) {
-        Py_DECREF(py_name);
-        return -1;
-    }
-    puts(PyUnicode_AsUTF8(py_name));
-    Py_DECREF(module);
-    Py_DECREF(py_name);
-    Py_DECREF(semlock_type);
+    Py_DECREF(ret);
+    DEBUG_PID_FUNC("register SEMAPHORE", 0, 0, "O");
     return 0;
-
-    PyObject *py_shared_mem_name = PyDict_GetItemString(semlock_type->tp_dict,
-                                            "_MACOSX_SHAREDMEM_NAME");
-    if (py_shared_mem_name == NULL) {
-        puts("Cannot get shared memory name from module");
-        Py_DECREF(py_shared_mem_name);
-        return -1;
-    }
-    PyObject *py_glock_mem_name = PyDict_GetItemString(semlock_type->tp_dict,
-                                            "_MACOSX_GLOCK_NAME");
-    if (py_glock_mem_name == NULL) {
-        puts("Cannot get glock memory name from module");
-        Py_DECREF(py_glock_mem_name);
-        return -1;
-    }
-    strncpy(name_shm, PyUnicode_AsUTF8(py_shared_mem_name), sizeof(name_shm)-1);
-    strncpy(name_glock, PyUnicode_AsUTF8(py_glock_mem_name), sizeof(name_glock)-1);
-    Py_DECREF(py_shared_mem_name);
-    Py_DECREF(py_glock_mem_name);
-    Py_DECREF(module);
-    py_DECREF(py_name;
-    Py_DECREF(semlock_type);
-    puts("Successfully retrieved memory names");
-    return 0;
-        Py_DECREF(module);
-    py_DECREF(py_name;
-    Py_DECREF(semlock_type);
 }
--- */
+
+static int
+_register_resource_tracker_mem(void)
+{
+    PyObject *f_register = PyImport_ImportModuleAttrString("multiprocessing.resource_tracker",
+                                                        "register");
+    if (f_register == NULL) {
+        PyErr_Clear();
+        puts("no call to register");
+        return -1;
+    }
+    PyObject *pmem_name = PyUnicode_FromString(SHAREDMEM_NAME);
+    PyObject *ptype_mem = PyUnicode_FromString("shared_memory");
+    PyObject *ret = PyObject_CallFunctionObjArgs(f_register, pmem_name, ptype_mem, NULL);
+    Py_DECREF(pmem_name);
+    Py_DECREF(ptype_mem);
+    Py_DECREF(f_register);
+    if (ret == NULL) {
+        PyErr_Clear();
+        puts("no call to register");
+        return -1;
+    }
+    Py_DECREF(ret);
+    DEBUG_PID_FUNC("register MEMORY", 0, 0, "Okay");
+    return 0;
+}
+
+/*-- */
 
 /*
 SemLockObject with aditionnal members:
-+ a mutex to handle safely the associated CounterObject.
++ a mutex to safely handle the associated CounterObject.
 + a pointer to CounterObject (from array).
 */
 typedef struct {
@@ -451,7 +466,6 @@ typedef struct {
     /* Additionnal datas for handle MacOSX semaphore */
     SEM_HANDLE handle_mutex;
     CounterObject *counter;
-    int created;
 } SemLockObject;
 
 #define _SemLockObject_CAST(op) ((SemLockObject *)(op))
@@ -484,8 +498,7 @@ exist_lock(SEM_HANDLE handle)
    int err = 0;
 
    if (handle == NULL || handle == SEM_FAILED) {
-        DEBUG_PID_FUNC("0", handle, (unsigned long)errno, "Sem never created");
-        shm_semlock_counters.state_this = THIS_NOT_OPEN;
+        DEBUG_PID_FUNC("0", handle, (unsigned long)errno, "Sem never created or connected");
         return 0;
     }
 
@@ -497,7 +510,6 @@ exist_lock(SEM_HANDLE handle)
 
     if (res < 0 && (errno == EBADF)) {
         DEBUG_PID_FUNC("1", handle, (unsigned long)errno, "Sem already existed but invalid");
-        shm_semlock_counters.state_this = THIS_NOT_OPEN;
         return 0;
     }
 
@@ -512,7 +524,7 @@ exist_lock(SEM_HANDLE handle)
             if (res == MP_EXCEPTION_HAS_BEEN_SET)
             break;
         } while (res < 0 && errno == EINTR && !PyErr_CheckSignals());
-        DEBUG_PID_FUNC("2", handle, (unsigned long)errno, "Sem exists, but busy");
+        DEBUG_PID_FUNC("2", handle, (unsigned long)errno, "Sem exists, could be interrups");
     }
 
     if (res == 0) {
@@ -520,9 +532,11 @@ exist_lock(SEM_HANDLE handle)
             PyErr_SetFromErrno(PyExc_OSError);
             return 0;
         }
+        DEBUG_PID_FUNC("3", handle, 0, "exists and so release it");
         return 1;
     }
 
+    DEBUG_PID_FUNC("4", handle, (unsigned long)errno, "Sem exists, but buy");
     return res < 0 && errno == EAGAIN ? 1 : 0;
 }
 
@@ -570,30 +584,7 @@ Global Lock functions as:
 - delete the global lock.
 */
 
-static int
-connect_glock_and_lock(const char *sem_name)
-{
-    SEM_HANDLE sem = SEM_FAILED;
-
-    errno = 0;
-    // create and lock the semaphore, via initial value set 0)
-    sem = SEM_CREATE(sem_name, 0, 1);
-    if (sem == SEM_FAILED) {
-        errno = 0;
-        // Semaphore exists, just opens it.
-        sem = sem_open(sem_name, 0);
-        DEBUG_PID_FUNC(sem_name, sem, 0, "opened glock");
-        shm_semlock_counters.handle_glock = sem;
-        ACQUIRE_GLOCK;
-        return 0;
-    }
-    // Created successfully and already acquire.
-    DEBUG_PID_FUNC(sem_name, sem, 0, "created glock");
-    shm_semlock_counters.handle_glock = sem;
-    return 1;
-}
-
-/*-------
+/*
 static int
 _create_glock_and_lock(const char *sem_name)
 {
@@ -610,7 +601,7 @@ _create_glock_and_lock(const char *sem_name)
     shm_semlock_counters.handle_glock = sem;
     return 0;
 }
-
+*/
 
 static int
 _connect_glock_and_lock(const char *sem_name)
@@ -618,9 +609,13 @@ _connect_glock_and_lock(const char *sem_name)
     SEM_HANDLE sem = SEM_FAILED;
 
     errno = 0;
-    // Semaphore exists, just opens it.
+    printf("*** %50s ***\n", PyUnicode_AsUTF8(PyConfig_Get("executable")));
+
+    PyErr_Clear();
     sem = sem_open(sem_name, 0);
     if (sem == SEM_FAILED) {
+        printf("name: %s, sem: %lx, errno = %d\n", sem_name, (unsigned long)sem, errno);
+        DEBUG_PID_FUNC(sem_name, (unsigned long)sem, errno, "opened failed");
         return -1;
     }
     ACQUIRE_GLOCK;
@@ -628,53 +623,68 @@ _connect_glock_and_lock(const char *sem_name)
     shm_semlock_counters.handle_glock = sem;
     return 0;
 }
----- */
 
 static int
-delete_glock(void)
+connect_glock_and_lock(const char *sem_name)
 {
-    int res = -1;
-
-    if (shm_semlock_counters.handle_glock != SEM_FAILED) {
-        DEBUG_PID_FUNC(shm_semlock_counters.name_glock,
-                        (unsigned long)shm_semlock_counters.handle_glock,
-                        0, "delete glock");
-        res = SEM_CLOSE(shm_semlock_counters.handle_glock);
-        shm_semlock_counters.handle_glock = SEM_FAILED;
-        if (res == 0) {
-            res = SEM_UNLINK(shm_semlock_counters.name_glock);
+    /* --
+    errno = 0;
+    if (_create_glock_and_lock(sem_name) < 0) {
+        if( _connect_glock_and_lock(sem_name) < 0) {
+            return -1;
         }
     }
-    return res;
+    return 0;
+    -- */
+
+
+    SEM_HANDLE sem = SEM_FAILED;
+    errno = 0;
+   // create and lock the semaphore, via initial value set 0)
+    sem = SEM_CREATE(sem_name, 0, 1);
+    if (sem == SEM_FAILED) {
+        errno = 0;
+        // Semaphore exists, just opens it.
+        sem = sem_open(sem_name, 0);
+        DEBUG_PID_FUNC(sem_name, sem, 0, "opened glock");
+        shm_semlock_counters.handle_glock = sem;
+        ACQUIRE_GLOCK;
+        return 0;
+    }
+    // Created successfully and already acquire.
+    DEBUG_PID_FUNC(sem_name, sem, 0, "created glock");
+    shm_semlock_counters.handle_glock = sem;
+    _register_resource_tracker_sem();
+    DEBUG_PID_FUNC(sem_name, sem, 0, "register resource tracker");
+    return 1;
 }
 
 /*
 Shared memory management
 */
 
-static int
-delete_shm_semlock_counters(void)
-{
-    int res = - 1;
-    if (shm_semlock_counters.handle_glock != SEM_FAILED &&
-        shm_semlock_counters.state_this == THIS_AVAILABLE) {
 
-        DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm_semlock_counters.handle_shm,
-                        0, "remove glock and shared mem");
-        res = munmap(shm_semlock_counters.header,
-                shm_semlock_counters.header->size_shm);
-        if (shm_semlock_counters.handle_shm > 0) {
-            res = close(shm_semlock_counters.handle_shm);
-            shm_semlock_counters.handle_shm = (MEMORY_HANDLE)0;
-        }
+#ifdef HAVE_SYS_MMAN_H
+#  include <sys/mman.h>           // shm_open(), shm_unlink()
+#endif
+
+
+// From posixshmem.c file
+static int
+_posixshmem_shm_open(char *name, int flags, int mode)
+{
+    int async_err = 0;
+    int fd;
+    do {
         Py_BEGIN_ALLOW_THREADS
-        res = shm_unlink(shm_semlock_counters.name_shm);
+        fd = shm_open(name, flags, mode);
         Py_END_ALLOW_THREADS
-        shm_semlock_counters.header = NULL;
-        shm_semlock_counters.counters = NULL;
-        shm_semlock_counters.state_this = THIS_CLOSED;
+    } while (fd < 0 && errno == EINTR && !(async_err = PyErr_CheckSignals()));
+
+    if (fd < 0) {
+        return -1;
     }
-    return res;
+    return fd;
 }
 
 static int
@@ -686,24 +696,28 @@ create_shm_semlock_counters(const char *from_sem_name)
     int res = -1;
     char *datas = NULL;
     HeaderObject *header = NULL;
-    long size_shm = CALC_SIZE_SHM;
+    long size_shm = ALIGN_SHM_PAGE(CALC_SIZE_SHM);
 
     // Link to semaphore and lock immediatly.
-    connect_glock_and_lock(shm_semlock_counters.name_glock);
+    if (connect_glock_and_lock(shm_semlock_counters.name_glock) < 0) {
+        DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm, 0, "connect or create GLOCK Failed");
+        return -1;
+    };
 
-    // We are alone to create shared memory.
+    // We are alone to create/connect to the shared memory.
     if (shm_semlock_counters.handle_shm == (MEMORY_HANDLE)0) {
-        // Calculate a new size as a multiple of SC_PAGESIZE.
-        shm = shm_open(shm_semlock_counters.name_shm, oflag, mode);
+        shm = _posixshmem_shm_open(shm_semlock_counters.name_shm, oflag, mode);
         res = 0;
         if (shm == -1) {
             oflag |= O_CREAT;
-            shm = shm_open(shm_semlock_counters.name_shm, oflag, S_IRUSR | S_IWUSR);
+            shm = _posixshmem_shm_open(shm_semlock_counters.name_shm, oflag, mode);
             if (shm > 0) {
                 DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm, 0, "***create shm***");
-                size_shm = ALIGN_SHM_PAGE(size_shm);
                 // Set size.
                 res = ftruncate(shm, size_shm);
+                DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm, size_shm, "***ftruncate shm***");
+                _register_resource_tracker_mem();
+                DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm, size_shm, "***register resource tracker***");
             } else {
                 // error create shm
                 DEBUG_PID_FUNC(shm_semlock_counters.name_shm, 0, (unsigned long)errno, "***error shm***");
@@ -734,9 +748,6 @@ create_shm_semlock_counters(const char *from_sem_name)
                     header->n_slots = CALC_NB_SLOTS(size_shm);
                     header->n_semlocks = 0;
                 }
-
-                /* Initialization is successful. */
-                shm_semlock_counters.state_this = THIS_AVAILABLE;
                 DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm_semlock_counters.handle_shm,
                                 0, "shm available");
             } else {
@@ -749,39 +760,11 @@ create_shm_semlock_counters(const char *from_sem_name)
             close(shm_semlock_counters.handle_shm);
             shm_semlock_counters.handle_shm = (MEMORY_HANDLE)0;
         }
-        RELEASE_GLOCK;
     }
     return res;
 }
+
 /*-------
-#ifdef HAVE_SYS_MMAN_H
-#  include <sys/mman.h>           // shm_open(), shm_unlink()
-#endif
-
-
-// From posixshmem.c file
-static int
-_shm_open(char *name, int flags, int mode)
-{
-    int fd;
-    int async_err = 0;
-
-    do {
-        Py_BEGIN_ALLOW_THREADS
-        fd = shm_open(name, flags, mode);
-        Py_END_ALLOW_THREADS
-    } while (fd < 0 && errno == EINTR && !(async_err = PyErr_CheckSignals()));
-
-    if (fd < 0) {
-        if (!async_err)
-            PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, PyUnicode_FromString(name));
-        return -1;
-    }
-
-    return fd;
-}
-
-
 static int
 _create_shm_semlock_counters(const char *from_sem_name) {
     int oflag = O_RDWR | O_CREAT;;
@@ -832,41 +815,38 @@ _create_shm_semlock_counters(const char *from_sem_name) {
         header->n_slots = CALC_NB_SLOTS(size_shm);
         header->n_semlocks = 0;
 
-        // Initialization is successful.
-        shm_semlock_counters.state_this = THIS_AVAILABLE;
+       res = 0;
     } else {
-        res = -1;
         // error mmap
         close(shm_semlock_counters.handle_shm);
         shm_semlock_counters.handle_shm = (MEMORY_HANDLE)0;
+        res = -1;
     }
     // mmap
     RELEASE_GLOCK;
     return res;
 }
+-------------*/
 
 static int
 _connect_shm_semlock_counters(const char *from_sem_name)
 {
     int oflag = O_RDWR;
-    int mode = S_IRUSR | S_IWUSR;
     int shm = -1;
     int res = -1;
     char *datas = NULL;
-    HeaderObject *header = NULL;
     long size_shm = CALC_SIZE_SHM;
 
     // Link to semaphore and lock immediatly.
     if (_connect_glock_and_lock(shm_semlock_counters.name_glock) < 0) {
-        puts("error connect glock and lock");
+        DEBUG_PID_FUNC("", 0, 0, "error connect glock and lock");
         return -1;
     };
-
-    // The global lock is already acquire, connect to the shared memory
-    shm = _shm_open(shm_semlock_counters.name_shm, oflag, mode);
+    // The global lock is now acquired,
+    // connect to the shared memory.
+    shm = _posixshmem_shm_open(shm_semlock_counters.name_shm, oflag, S_IRUSR | S_IWUSR);
     if (shm == -1) {
         shm_semlock_counters.handle_shm = (MEMORY_HANDLE)0;
-        RELEASE_GLOCK;
         return -1;
     }
     DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm, 0, "open shm");
@@ -882,20 +862,19 @@ _connect_shm_semlock_counters(const char *from_sem_name)
         shm_semlock_counters.header = (HeaderObject *)datas;
         // First slot of array
         shm_semlock_counters.counters = (CounterObject *)(datas + sizeof(HeaderObject));
-        header = shm_semlock_counters.header;
 
         // Initialization is successful.
-        shm_semlock_counters.state_this = THIS_AVAILABLE;
+        DEBUG_PID_FUNC(shm_semlock_counters.name_shm, shm, datas, "map shm");
+        res = 0;
     } else {
-        res = -1;
         // error mmap
         close(shm_semlock_counters.handle_shm);
         shm_semlock_counters.handle_shm = (MEMORY_HANDLE)0;
+        res = -1;
     }
-    RELEASE_GLOCK;
     return res;
 }
--------------*/
+
 
 /*
 Build name of mutex associated with each Semaphore.
@@ -911,15 +890,6 @@ _build_mutex_name(char *buf, int size, const char *name)
 }
 
 /*
-static char *
-_build_shm_name(char *buf, int size)
-{
-    PyOS_snprintf(buf, size, "/psm_%s_%06d", gh_name, getpid());
-    return buf;
-}
-*/
-
-/*
 Search if the semaphore name is already stored in the array of CounterObject
 stored into the shared memory.
 */
@@ -931,7 +901,6 @@ _search_counter_from_sem_name(const char *sem_name)
     CounterObject *counter = shm_semlock_counters.counters;
 
     while(i < header->n_slots && j < header->n_semlocks) {
-        //DEBUG_PID_FUNC(sem_name, (unsigned long)counter, 0, counter->sem_name);
         if(!PyOS_stricmp(counter->sem_name, sem_name)) {
             return counter;
         }
@@ -992,7 +961,6 @@ new_counter(SemLockObject *self, const char *name, int value, int unlink)
     if (counter) {
         strcpy(counter->sem_name, name);
         counter->internal_value = value;
-        counter->n_instances = 0;
         counter->unlink = unlink;
         counter->ctimestamp = time(NULL);
 
@@ -1010,18 +978,12 @@ new_counter(SemLockObject *self, const char *name, int value, int unlink)
 dealloc CounterObject.
 */
 
-static int
+static void
 remove_counter(CounterObject *counter)
 {
-    int res = -1;
     DEBUG_PID_FUNC(counter->sem_name, 0, counter, "");
     memset(counter, 0, sizeof(CounterObject));
     --shm_semlock_counters.header->n_semlocks;
-
-    if (!shm_semlock_counters.header->n_semlocks) {
-        res = delete_shm_semlock_counters();
-    }
-    return res;
 }
 
 #endif /* HAVE_BROKEN_SEM_GETVALUE */
@@ -1244,7 +1206,6 @@ newsemlockobject(PyTypeObject *type, SEM_HANDLE handle, int kind, int maxvalue,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     self->handle_mutex = SEM_FAILED;
     self->counter = NULL;
-    self->created = false;
 #endif
     return (PyObject*)self;
 }
@@ -1289,6 +1250,21 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
         }
         strcpy(name_copy, name);
     }
+
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+    if (ISSEMAPHORE_FROM_ARGS(maxvalue, kind)) {
+        DEBUG_PID_FUNC(name_copy, 0, 0, "Exists lock");
+        if (!EXIST_GLOCK) {
+            if (create_shm_semlock_counters(name) < 0) {
+                RELEASE_GLOCK;
+                goto failure;
+            }
+        } else {
+            ACQUIRE_GLOCK;
+        }
+    }
+#endif /* HAVE_BROKEN_SEM_GETVALUE*/
+
     SEM_CLEAR_ERROR();
     handle = SEM_CREATE(name, value, maxvalue);
     /* On Windows we should fail if GetLastError()==ERROR_ALREADY_EXISTS */
@@ -1304,39 +1280,22 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     semlock = _SemLockObject_CAST(result);
     if (ISSEMAPHORE(semlock)) {
-        PyMutex_Lock(&shm_semlock_counters.shm_counters_mutex);
-        if (!exist_lock(shm_semlock_counters.handle_glock) ||
-            shm_semlock_counters.state_this != THIS_AVAILABLE) {
-
-            if (create_shm_semlock_counters(name) < 0) {
-//            if (_create_shm_semlock_counters(name) < 0) {
-                PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
-                goto failure;
-            }
-        }
-        PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
-
-        // error is set in ACQUIRE/RELEASE_* macros.
-        if (!ACQUIRE_GLOCK) // error set in acquire_lock function
-            goto failure;
         handle_mutex = SEM_CREATE(_build_mutex_name(mutex_name, SIZE_MUTEX_NAME,  name), 1, 1);
         if (handle_mutex != SEM_FAILED) {
+            // Counter must exist
             counter = new_counter(semlock, name, value, unlink);
             if(counter) {
                 semlock->handle_mutex = handle_mutex;
                 semlock->counter = counter;
-                semlock->created = true;
                 // unlink
                 if (unlink && SEM_UNLINK(mutex_name) < 0)
                     goto failure;
-                DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "SemLock created");
+                DEBUG_PID_FUNC(name_copy, handle_mutex, semlock->counter, "SemLock created");
             }
         }
-        // error is set in ACQUIRE/RELEASE_* macros.
         if (!RELEASE_GLOCK) {
             goto failure;
         }
-        ++counter->n_instances;
 
         if (!counter) {
             PyObject_GC_UnTrack(semlock);
@@ -1347,8 +1306,7 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
         if (handle_mutex == SEM_FAILED)
             goto failure;
     }
-
-#endif
+#endif /* HAVE_BROKEN_SEM_GETVALUE*/
 
     return result;
 
@@ -1374,7 +1332,7 @@ _multiprocessing_SemLock_impl(PyTypeObject *type, int kind, int value,
             }
         }
     }
-#endif
+#endif /* HAVE_BROKEN_SEM_GETVALUE*/
 
     PyMem_Free(name_copy);
     return NULL;
@@ -1414,6 +1372,18 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
             return PyErr_NoMemory();
         strcpy(name_copy, name);
     }
+#ifdef HAVE_BROKEN_SEM_GETVALUE
+    if (ISSEMAPHORE_FROM_ARGS(maxvalue, kind)) {
+        if (!EXIST_GLOCK) {
+            if (_connect_shm_semlock_counters(name) < 0) {
+                RELEASE_GLOCK;
+                goto failure;
+            }
+        } else {
+            ACQUIRE_GLOCK;
+        }
+    }
+#endif /* HAVE_BROKEN_SEM_GETVALUE*/
 
 #ifndef MS_WINDOWS
     if (name != NULL) {
@@ -1431,21 +1401,6 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     semlock = _SemLockObject_CAST(result);
     if (ISSEMAPHORE(semlock)) {
-        PyMutex_Lock(&shm_semlock_counters.shm_counters_mutex);
-        if (!exist_lock(shm_semlock_counters.handle_glock) ||
-            shm_semlock_counters.state_this != THIS_AVAILABLE) {
-            if (create_shm_semlock_counters(name) < 0) {
-//            if (_connect_shm_semlock_counters(name) < 0) {
-                PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
-                goto failure;
-            }
-        }
-        PyMutex_Unlock(&shm_semlock_counters.shm_counters_mutex);
-
-        if(!ACQUIRE_GLOCK) {
-            goto failure;
-        }
-        // error is set in ACQUIRE/RELEASE_* macros.
         handle_mutex = sem_open(_build_mutex_name(mutex_name, SIZE_MUTEX_NAME,  name), 0);
         if (handle_mutex != SEM_FAILED) {
             counter = connect_counter(semlock);
@@ -1453,7 +1408,7 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
                 DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "find counter");
                 semlock->counter = counter;
                 semlock->handle_mutex = handle_mutex;
-                semlock->created = false;
+
             } else {
                 DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "counter not found");
             }
@@ -1461,11 +1416,13 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
         if(!RELEASE_GLOCK) {
             goto failure;
         }
+        DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "GLOCK release");
+        PyErr_Clear();
         if (counter && handle_mutex != SEM_FAILED) {
-            // all is fine
-            ++counter->n_instances;
+            DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "done");
             return result;
         }
+    DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "Here ????");
 
     failure:
         DEBUG_PID_FUNC(name_copy, handle_mutex, counter, "Failure");
@@ -1493,6 +1450,7 @@ _multiprocessing_SemLock__rebuild_impl(PyTypeObject *type, SEM_HANDLE handle,
         return NULL;
     }
 #endif /* HAVE_BROKEN_SEM_GETVALUE */
+
     return result;
 }
 
@@ -1508,32 +1466,18 @@ semlock_dealloc(SemLockObject* self)
 
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     if (ISSEMAPHORE(self)) {
-        /*
-        In "forkserver" and "fork" start method, there are as many calls to
-        semlock_impl as calls to semlock_dealloc
-        In "spawn" start method, there are as calls to semlock_dealloc as
-        calls to semlock_impl plus calls to semlock_rebuild.
-        Here, it's not possible to known to teh real start method.
-        So we have to search if sempahore already exists yet.
-        */
-        int n_opened_sems = -1;
-        //CounterObject *counter = NULL;
-
         if (self->handle_mutex != SEM_FAILED) {
             SEM_CLOSE(self->handle_mutex);
         }
         DEBUG_PID_FUNC(self->name, self->handle, self->counter, "handle mutex closed");
 
         if (EXIST_GLOCK && ACQUIRE_GLOCK) {
-            DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "unlink is one");
             if (self->counter->unlink == 1) {
-                n_opened_sems = remove_counter(self->counter);
-                DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "remove counter");
+                // case of 'fork' start method.
+                remove_counter(self->counter);
+                DEBUG_PID_FUNC(self->name, self->handle_mutex, self->counter, "remove counter (fork)");
             }
             RELEASE_GLOCK;
-            if (n_opened_sems == 0) {
-                delete_glock();
-            }
         }
         self->counter = NULL;
     }
@@ -1777,50 +1721,22 @@ _PyMp_sem_unlink(const char *name)
 #ifdef HAVE_BROKEN_SEM_GETVALUE
     char mutex_name[SIZE_MUTEX_NAME];
     CounterObject *counter = NULL;
-    int n_opened_sems = -1;
 
     if (SEM_UNLINK(_build_mutex_name(mutex_name, SIZE_MUTEX_NAME,  name)) == 0) {
         /*
-        So the only place where we could set unlink flag to 1 is there because this function is called
-        only per semaphore.
-        Note that in "fork" start method, this function is never called, unlink flag is always set to 0.
+        Here we could remove each assiociated semphore counter when start mùethods
+        are 'spawn' or 'forkserver'.
+        Note that in "fork" start method, this function is never called,
+        unlink flag is always set to 0.
         */
         if (EXIST_GLOCK && ACQUIRE_GLOCK) {
             counter = _search_counter_from_sem_name(name);
             if (counter) {
-                DEBUG_PID_FUNC(name, 0, counter, "unlink sem");
-                n_opened_sems = remove_counter(counter);
-            }
-            RELEASE_GLOCK;
-            if (!n_opened_sems) {
-                delete_glock();
-            }
-        }
-        /*
-        if (EXIST_GLOCK && ACQUIRE_GLOCK) {
-            counter = _search_counter_from_sem_name(name);
-            if (counter) {
-                DEBUG_PID_FUNC(name, 0, counter, "set unlink to 1");
-                counter->unlink = 1;
+                remove_counter(counter);
+                DEBUG_PID_FUNC(name, 0, counter, "remove counter");
             }
             RELEASE_GLOCK;
         }
-        */
-        /*
-        if (EXIST_GLOCK && ACQUIRE_GLOCK) {
-            puts("unlink sem, search counter and remove it");
-            counter = _search_counter_from_sem_name(name);
-            if (counter) {
-                DEBUG_PID_FUNC(name, 0, counter, "unlink sem");
-                n_opened_sems = remove_counter(counter);
-                puts("unlink sem, removed");
-            }
-            RELEASE_GLOCK;
-            if (!n_opened_sems) {
-                delete_glock();
-            }
-        }
-        */
     }
 #endif /* HAVE_BROKEN_SEM_GETVALUE */
 
