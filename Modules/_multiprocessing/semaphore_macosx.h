@@ -60,7 +60,7 @@ struct _CountersWorkaround{
 #define ISSEMAPHORE(o)                  ((o)->maxvalue > 1 && (o)->kind == SEMAPHORE)
 #define ISSEMAPHORE_FROM_ARGS(m, k)     ((m) > 1 && (k) == SEMAPHORE)
 
-#define DEBUG_MACOSX_SEMAPHORE 1
+#define DEBUG_MACOSX_SEMAPHORE 0
 #if defined(Py_DEBUG) && DEBUG_MACOSX_SEMAPHORE == 1
     #define DEBUG_PID_FUNC(n, h, c, m)  do { \
                                             fprintf(stdout, "%-40s(%4d) - " \

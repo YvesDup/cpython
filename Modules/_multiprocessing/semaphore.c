@@ -609,12 +609,10 @@ _connect_glock_and_lock(const char *sem_name)
     SEM_HANDLE sem = SEM_FAILED;
 
     errno = 0;
-    printf("*** %50s ***\n", PyUnicode_AsUTF8(PyConfig_Get("executable")));
 
     PyErr_Clear();
     sem = sem_open(sem_name, 0);
     if (sem == SEM_FAILED) {
-        printf("name: %s, sem: %lx, errno = %d\n", sem_name, (unsigned long)sem, errno);
         DEBUG_PID_FUNC(sem_name, (unsigned long)sem, errno, "opened failed");
         return -1;
     }
