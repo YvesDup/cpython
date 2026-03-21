@@ -145,7 +145,7 @@ if sys.platform == 'darwin':
             self._count = ctx.Value('h', value)
             super().__init__(kind, value, maxvalue, ctx=ctx)
 
-        def acquire(self, blocking=True, timeout=None) -> bool:
+        def acquire(self, blocking=True, timeout=None):
             if self._semlock.acquire(blocking, timeout):
                 with self._count:
                     self._count.value -= 1
@@ -162,7 +162,7 @@ if sys.platform == 'darwin':
                 self._count.value += 1
                 self._semlock.release()
 
-        def get_value(self) -> int:
+        def get_value(self):
             return self._count.value
 
         def _make_methods(self):
@@ -186,7 +186,7 @@ else:
             super().__init__(kind, value, maxvalue, ctx=ctx)
 
         def get_value(self) -> int:
-            return self._semlock.get_value()
+            return self._semlock._get_value()
 
     _SemClass = _NotMacOSXSemaphore
 
