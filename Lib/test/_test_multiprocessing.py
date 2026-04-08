@@ -2042,7 +2042,9 @@ class _TestCondition(BaseTestCase):
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_sleeping_count_invariant_when_elapsed_timeouts(self):
-        # See gh-69655.
+        # See gh-69655: In the `wait` method, exclude processes/threads
+        # that have exceeded the timeout from the list of pendings.
+
         if self.TYPE != 'processes':
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
 
@@ -2052,8 +2054,8 @@ class _TestCondition(BaseTestCase):
         for _ in range(n):
             with cond:
                 cond.wait(0.0)
-        # Sempahore.locked() is equivalent to
-        # Semaphore._semlock._is_zero()
+
+        # Check there is no sleeper.
         self.assertTrue(cond._sleeping_count.locked())
         self.assertTrue(cond._woken_count.locked())
 

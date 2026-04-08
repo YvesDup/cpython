@@ -280,7 +280,10 @@ class Condition(object):
                 self._woken_count.release()
             else:
                 # we timed out, so remove ourselves from the sleeping count
-                self._sleeping_count.acquire()
+                #  if possible.
+                if not self._sleeping_count.acquire(False):
+                    print('+')
+                    self._woken_count.release()
 
             # reacquire lock
             for i in range(count):
@@ -294,10 +297,13 @@ class Condition(object):
 
         # to take account of timeouts since last notify*() we subtract
         # woken_count from sleeping_count and rezero woken_count
-        #while self._woken_count.acquire(False):
-        #    res = self._sleeping_count.acquire(False)
-        #    assert res, ('notify: Bug in sleeping_count.acquire'
-        #                 + '- res should not be False')
+        i = 0
+        while self._woken_count.acquire(False):
+            res = self._sleeping_count.acquire(False)
+            assert res, ('notify: Bug in sleeping_count.acquire'
+                         + '- res should not be False')
+            i += 1
+        print('.'*i, end='')
 
         sleepers = 0
         while sleepers < n and self._sleeping_count.acquire(False):
@@ -310,6 +316,7 @@ class Condition(object):
 
             # rezero wait_semaphore in case some timeouts just happened
             while self._wait_semaphore.acquire(False):
+                print(':', end='')
                 pass
 
     def notify_all(self):
