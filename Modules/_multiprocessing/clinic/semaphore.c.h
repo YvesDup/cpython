@@ -416,7 +416,13 @@ _multiprocessing_SemLock__get_value_impl(SemLockObject *self);
 static PyObject *
 _multiprocessing_SemLock__get_value(PyObject *self, PyObject *Py_UNUSED(ignored))
 {
-    return _multiprocessing_SemLock__get_value_impl((SemLockObject *)self);
+    PyObject *return_value = NULL;
+
+    Py_BEGIN_CRITICAL_SECTION(self);
+    return_value = _multiprocessing_SemLock__get_value_impl((SemLockObject *)self);
+    Py_END_CRITICAL_SECTION();
+
+    return return_value;
 }
 
 #endif /* defined(HAVE_MP_SEMAPHORE) */
@@ -438,7 +444,13 @@ _multiprocessing_SemLock__is_zero_impl(SemLockObject *self);
 static PyObject *
 _multiprocessing_SemLock__is_zero(PyObject *self, PyObject *Py_UNUSED(ignored))
 {
-    return _multiprocessing_SemLock__is_zero_impl((SemLockObject *)self);
+    PyObject *return_value = NULL;
+
+    Py_BEGIN_CRITICAL_SECTION(self);
+    return_value = _multiprocessing_SemLock__is_zero_impl((SemLockObject *)self);
+    Py_END_CRITICAL_SECTION();
+
+    return return_value;
 }
 
 #endif /* defined(HAVE_MP_SEMAPHORE) */
@@ -582,4 +594,4 @@ exit:
 #ifndef _MULTIPROCESSING_SEMLOCK___EXIT___METHODDEF
     #define _MULTIPROCESSING_SEMLOCK___EXIT___METHODDEF
 #endif /* !defined(_MULTIPROCESSING_SEMLOCK___EXIT___METHODDEF) */
-/*[clinic end generated code: output=d1e349d4ee3d4bbf input=a9049054013a1b77]*/
+/*[clinic end generated code: output=73eacaba84db92de input=a9049054013a1b77]*/
