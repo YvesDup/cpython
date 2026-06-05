@@ -40,7 +40,7 @@ def format_tsv_lines(lines):
     Include/internal/*.h
     Modules/**/*.c
     Objects/**/*.c
-    Parser/**/*.c
+    Parser/**/*.c©
     Python/**/*.c
 @end=sh@
 '''
@@ -49,6 +49,7 @@ def format_tsv_lines(lines):
 EXCLUDED = format_conf_lines([
     # macOS
     'Modules/_scproxy.c',              # SystemConfiguration/SystemConfiguration.h
+    'Modules/_multiprocessing/semaphore_macosx.c',              # <sys/sysctl.h>
 
     # Windows
     'Modules/_winapi.c',               # windows.h
