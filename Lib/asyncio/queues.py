@@ -5,6 +5,7 @@ __all__ = (
     'QueueFull',
     'QueueEmpty',
     'QueueShutDown',
+    'QueueWithPendingTasks',
 )
 
 import collections
@@ -27,6 +28,16 @@ class QueueFull(Exception):
 
 class QueueShutDown(Exception):
     """Raised when putting on to or getting from a shut-down Queue."""
+    pass
+
+
+class QueueWithPendingTasks(Exception):
+    """Raised when:
+    + Queue.put_nowait() is called on a not full Queue with pending putters
+        or a putter in transit - data travelling from putters to the queue,
+    + Queue.get_nowait() is called on a not empty Queue with pending getters
+        or a getter in transit.
+    """
     pass
 
 
@@ -54,6 +65,11 @@ class Queue(mixins._LoopBoundMixin):
         self._finished.set()
         self._init(maxsize)
         self._is_shutdown = False
+        # See gh-83055.
+        self._is_getter_in_transit = False
+        self._is_putter_in_transit = False
+        self._call_from_get_or_put = False
+
 
     # These three are overridable in subclasses.
 
@@ -70,11 +86,17 @@ class Queue(mixins._LoopBoundMixin):
 
     def _wakeup_next(self, waiters):
         # Wake up the next waiter (if any) that isn't cancelled.
+        transit = False
         while waiters:
             waiter = waiters.popleft()
             if not waiter.done():
                 waiter.set_result(None)
+                transit = True
                 break
+        if waiters is self._getters:
+            self._is_getter_in_transit = transit
+        else:
+            self._is_putter_in_transit = transit
 
     def __repr__(self):
         return f'<{type(self).__name__} at {id(self):#x} {self._format()}>'
@@ -151,6 +173,7 @@ class Queue(mixins._LoopBoundMixin):
                     # the call.  Wake up the next in line.
                     self._wakeup_next(self._putters)
                 raise
+        self._call_from_get_or_put = True
         return self.put_nowait(item)
 
     def put_nowait(self, item):
@@ -159,11 +182,20 @@ class Queue(mixins._LoopBoundMixin):
         If no free slot is immediately available, raise QueueFull.
 
         Raises QueueShutDown if the queue has been shut down.
+
+        Raises QueueWithPendingTasks if there are pending putters or a putter
+        in transit.
         """
         if self._is_shutdown:
             raise QueueShutDown
         if self.full():
             raise QueueFull
+        if not self._call_from_get_or_put:
+            if self._putters or self._is_putter_in_transit:
+                raise QueueWithPendingTasks
+        else:
+            self._is_putter_in_transit = False
+        self._call_from_get_or_put = False
         self._put(item)
         self._unfinished_tasks += 1
         self._finished.clear()
@@ -198,6 +230,7 @@ class Queue(mixins._LoopBoundMixin):
                     # the call.  Wake up the next in line.
                     self._wakeup_next(self._getters)
                 raise
+        self._call_from_get_or_put = True
         return self.get_nowait()
 
     def get_nowait(self):
@@ -208,11 +241,20 @@ class Queue(mixins._LoopBoundMixin):
 
         Raises QueueShutDown if the queue has been shut down and is empty,
         or if the queue has been shut down immediately.
+
+        Raises QueueWithPendingTasks if there are pending getters or a getter
+        in transit.
         """
         if self.empty():
             if self._is_shutdown:
                 raise QueueShutDown
             raise QueueEmpty
+        if not self._call_from_get_or_put:
+            if self._getters or self._is_getter_in_transit:
+                raise QueueWithPendingTasks
+        else:
+            self._is_getter_in_transit = False
+        self._call_from_get_or_put = False
         item = self._get()
         self._wakeup_next(self._putters)
         return item
