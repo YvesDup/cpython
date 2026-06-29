@@ -202,7 +202,7 @@ Exceptions
 
 .. exception:: QueueWithPendingTasks
 
-   Exception raises when:
+   Exception raised when:
 
    * :meth:`~Queue.put_nowait` is called on a **not full** queue with pending
      putters exist or a woken putter task is about to put an item into the

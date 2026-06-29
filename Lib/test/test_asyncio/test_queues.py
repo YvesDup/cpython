@@ -214,6 +214,7 @@ class QueueGetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(queue._getters), 0)
 
     async def test_get_nowait_with_putters(self):
+        # See gh-83055
         async def _get(q, results):
             item = await q.get()
             results.append(item)
@@ -481,6 +482,7 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
             await put_task
 
     async def test_put_nowait_with_getters(self):
+        # See gh-83055
         size = 1
         q = asyncio.Queue(size)
         n = 3

@@ -33,9 +33,9 @@ class QueueShutDown(Exception):
 
 class QueueWithPendingTasks(Exception):
     """Raised when:
-    + Queue.put_nowait() is called on a not full Queue with pending putters
+    + Queue.put_nowait() is called on a not full queue with pending putters
         or a putter in transit - data travelling from putters to the queue,
-    + Queue.get_nowait() is called on a not empty Queue with pending getters
+    + Queue.get_nowait() is called on a not empty queue with pending getters
         or a getter in transit.
     """
     pass
