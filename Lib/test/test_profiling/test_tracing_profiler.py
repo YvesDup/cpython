@@ -219,6 +219,8 @@ class TestCommandLine(unittest.TestCase):
         # gh-140729: test use Process in cProfile.
         self._test_process_run_pickle('spawn')
 
+    @unittest.skipIf(sys.platform == 'win32',
+                     "No 'forkserver' start method on Windows")
     def test_process_forkserver_pickle(self):
         # gh-140729: test use Process in cProfile.
         self._test_process_run_pickle('forkserver')
