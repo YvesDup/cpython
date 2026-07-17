@@ -1,4 +1,4 @@
-name: _Tests-Sanitizer-Only
+name: Tests-Sanitizer-Only
 
 on:
   workflow_dispatch:
