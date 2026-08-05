@@ -1859,7 +1859,7 @@ class _TestCondition(BaseTestCase):
     def test_repr_condition(self):
         cond = self.Condition()
         if self.TYPE == 'processes':
-            # on macOS, waiters can be unknown.
+            # on macOS, waiters can be 'unknown'.
             self.assertRegex(repr(cond),
                              r"<*.Condition object at .* "
                              r"\(lock=None, waiters=.*\)>")
@@ -2351,6 +2351,7 @@ class _TestBarrier(BaseTestCase):
         except threading.BrokenBarrierError:
             pass
 
+    @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_repr_barrier(self):
         if self.TYPE == 'processes':
             self.assertRegex(repr(self.barrier),
