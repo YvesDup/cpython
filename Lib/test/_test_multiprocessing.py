@@ -1545,7 +1545,7 @@ class _TestLock(BaseTestCase):
     def _acquire_event(lock, event):
         lock.acquire()
         event.set()
-        time.sleep(1.0)
+        time.sleep(0.1)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_repr_lock(self):
@@ -1553,10 +1553,12 @@ class _TestLock(BaseTestCase):
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
 
         lock = self.Lock()
-        self.assertEqual(f'<Lock(owner=None)>', repr(lock))
+        self.assertRegex(repr(lock), r"<*.Lock object at .* \(owner=None\)>")
 
         lock.acquire()
-        self.assertEqual(f'<Lock(owner=MainProcess)>', repr(lock))
+        self.assertRegex(repr(lock),
+                         r"<*.Lock object at .* "
+                         r"\(owner=MainProcess\)>")
         lock.release()
 
         tname = 'T1'
@@ -1566,16 +1568,21 @@ class _TestLock(BaseTestCase):
                              name=tname)
         t.start()
         time.sleep(0.1)
-        self.assertEqual(f'<Lock(owner=MainProcess|{tname})>', l[0])
+        self.assertRegex(repr(l[0]), "<*.Lock object at .* "
+                                    f"\\(owner=MainProcess\\|{tname}\\)>")
         lock.release()
+        t.join()
 
         t = threading.Thread(target=self._acquire,
                              args=(lock,),
                              name=tname)
         t.start()
         time.sleep(0.1)
-        self.assertEqual('<Lock(owner=SomeOtherThread)>', repr(lock))
+        self.assertRegex(repr(lock),
+                         r"<*.Lock object at .* "
+                         r"\(owner=SomeOtherThread\)>")
         lock.release()
+        t.join()
 
         pname = 'P1'
         l = multiprocessing.Manager().list()
@@ -1584,7 +1591,7 @@ class _TestLock(BaseTestCase):
                          name=pname)
         p.start()
         p.join()
-        self.assertEqual(f'<Lock(owner={pname})>', l[0])
+        self.assertRegex(l[0], f"<*.Lock object at .* \\(owner={pname}\\)>")
 
         lock = self.Lock()
         event = self.Event()
@@ -1593,8 +1600,10 @@ class _TestLock(BaseTestCase):
                          name='P2')
         p.start()
         event.wait()
-        self.assertEqual(f'<Lock(owner=SomeOtherProcess)>', repr(lock))
-        p.terminate()
+        self.assertRegex(repr(lock),
+                         f"<*.Lock object at .* "
+                         f"\\(owner=SomeOtherProcess\\)>")
+        p.join()
 
     def test_lock(self):
         lock = self.Lock()
@@ -1629,61 +1638,77 @@ class _TestLock(BaseTestCase):
         p.join()
 
     @staticmethod
-    def _acquire_release(lock, timeout, l=None, n=1):
+    def _acquire_release(rlock, timeout, l=None, n=1):
         for _ in range(n):
-            lock.acquire()
+            rlock.acquire()
         if l is not None:
-            l.append(repr(lock))
+            l.append(repr(rlock))
         time.sleep(timeout)
         for _ in range(n):
-            lock.release()
+            rlock.release()
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_repr_rlock(self):
         if self.TYPE != 'processes':
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
 
-        lock = self.RLock()
-        self.assertEqual('<RLock(None, 0)>', repr(lock))
+        rlock = self.RLock()
+        self.assertRegex(repr(rlock),
+                         r"<*.RLock object at .* "
+                         r"\(owner=None, count=0\)>")
 
         n = 3
         for _ in range(n):
-            lock.acquire()
-        self.assertEqual(f'<RLock(MainProcess, {n})>', repr(lock))
+            rlock.acquire()
+        self.assertRegex(repr(rlock),
+                         f"<*.RLock object at .* "
+                         f"\\(owner=MainProcess, count={n}\\)>")
+
         for _ in range(n):
-            lock.release()
+            rlock.release()
 
         t, l = [], []
         for i in range(n):
             t.append(threading.Thread(target=self._acquire_release,
-                                      args=(lock, 0.1, l, i+1),
+                                      args=(rlock, 0.1, l, i+1),
                                       name=f'T{i+1}'))
             t[-1].start()
         for t_ in t:
             t_.join()
         for i in range(n):
-            self.assertIn(f'<RLock(MainProcess|T{i+1}, {i+1})>', l)
+            if i < len(l):
+                self.assertRegex(repr(l[i]),
+                                 f"<*.RLock object at .* "
+                                 f"\\(owner=MainProcess|T{i+1}, "
+                                 f"count=nonzero\\)>")
 
         rlock = self.RLock()
         t = threading.Thread(target=rlock.acquire)
         t.start()
         t.join()
-        self.assertEqual('<RLock(SomeOtherThread, nonzero)>', repr(rlock))
+        self.assertRegex(repr(rlock),
+                         r"<*.RLock object at .* "
+                         r"\(owner=SomeOtherThread, count=nonzero\)>")
 
         pname = 'P1'
+        rlock = self.RLock()
         l = multiprocessing.Manager().list()
         p = self.Process(target=self._acquire_release,
-                         args=(lock, 0.1, l),
+                         args=(rlock, 0.1, l),
                          name=pname)
         p.start()
         p.join()
-        self.assertEqual(f'<RLock({pname}, 1)>', l[0])
+        self.assertRegex(repr(l[0]),
+                         f"<*.RLock object at .* "
+                         f"\\(owner={pname}, count=1\\)>")
 
         rlock = self.RLock()
         p = self.Process(target=self._acquire, args=(rlock,))
         p.start()
         p.join()
-        self.assertEqual('<RLock(SomeOtherProcess, nonzero)>', repr(rlock))
+        self.assertRegex(repr(rlock),
+                         r"<*.RLock object at .* "
+                         r"\(owner=SomeOtherProcess, count=nonzero\)>")
 
     def test_rlock(self):
         lock = self.RLock()
@@ -1756,6 +1781,27 @@ class _TestSemaphore(BaseTestCase):
         #    self.assertRaises(ValueError, sem.release)
         #    self.assertReturnsIfImplemented(2, get_value, sem)
 
+    @unittest.skipIf(HAVE_GETVALUE, 'needs sem_getvalue')
+    def test_repr_allsemaphores(self):
+        if self.TYPE != 'processes':
+            self.skipTest('test not appropriate for {}'.format(self.TYPE))
+        n = 5
+        sem = self.Semaphore(n)
+        self.assertRegex(repr(sem),
+                         f"<*.Semaphore object at .* \\(value={n}\\)>")
+        sem.acquire()
+        self.assertRegex(repr(sem),
+                         f"<*.Semaphore object at .* \\(value={n+1}\\)>")
+        bsem = self.BoundedSemaphore(n)
+        self.assertRegex(repr(bsem),
+                         f"<*.BoundedSemaphore object at .* "
+                         f"\\(value={n}, maxvalue={n}\\)>")
+        for _ in range(n):
+            bsem.release()
+        self.assertRegex(repr(bsem),
+                         f"<*.BoundedSemaphore object at .* "
+                         f"\\(value=0, maxvalue={n}\\)>")
+
     def test_timeout(self):
         if self.TYPE != 'processes':
             self.skipTest('test not appropriate for {}'.format(self.TYPE))
@@ -1809,6 +1855,27 @@ class _TestCondition(BaseTestCase):
                 self.assertEqual(cond._wait_semaphore.get_value(), 0)
             except NotImplementedError:
                 pass
+
+    def test_repr_condition(self):
+        cond = self.Condition()
+        if self.TYPE == 'processes':
+            # on macOS, waiters can be unknown.
+            self.assertRegex(repr(cond),
+                             r"<*.Condition object at .* "
+                             r"\(lock=None, waiters=.*\)>")
+            cond.acquire()
+            self.assertRegex(repr(cond),
+                             r"<*.Condition object at .* "
+                             r"\(lock=MainProcess, waiters=.*\)>")
+            cond.release()
+            self.assertRegex(repr(cond),
+                             r"<*.Condition object at .* "
+                             r"\(lock=None, waiters=.*\)>")
+        elif self.TYPE == 'managers':
+            self.assertRegex(repr(cond),
+                        r"ConditionProxy object, typeid 'Condition' at .*>")
+            cond.acquire()
+            print(cond)
 
     @warnings_helper.ignore_fork_in_thread_deprecation_warnings()
     def test_notify(self):
@@ -2131,18 +2198,20 @@ class _TestEvent(BaseTestCase):
         self.assertEqual(wait(), True)
         p.join()
 
-    def test_repr(self) -> None:
+    def test_repr_event(self) -> None:
         event = self.Event()
         if self.TYPE == 'processes':
-            self.assertRegex(repr(event), r"<Event at .* unset>")
+            self.assertRegex(repr(event), r"<*.Event object at .* \(unset\)>")
             event.set()
-            self.assertRegex(repr(event), r"<Event at .* set>")
+            self.assertRegex(repr(event), r"<*.Event object at .* \(set\)>")
             event.clear()
-            self.assertRegex(repr(event), r"<Event at .* unset>")
+            self.assertRegex(repr(event), r"<*.Event object at .* \(unset\)>")
         elif self.TYPE == 'manager':
-            self.assertRegex(repr(event), r"<EventProxy object, typeid 'Event' at .*")
+            self.assertRegex(repr(event),
+                             r"<EventProxy object, typeid 'Event' at .*")
             event.set()
-            self.assertRegex(repr(event), r"<EventProxy object, typeid 'Event' at .*")
+            self.assertRegex(repr(event),
+                             r"<EventProxy object, typeid 'Event' at .*")
 
 
 # Tests for Barrier - adapted from tests in test/lock_tests.py
@@ -2274,6 +2343,37 @@ class _TestBarrier(BaseTestCase):
             b.wait_for_finished()
         finally:
             b.close()
+
+    @staticmethod
+    def _barrier_wait(barrier):
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            pass
+
+    def test_repr_barrier(self):
+        if self.TYPE == 'processes':
+            self.assertRegex(repr(self.barrier),
+                        f"<*.Barrier object at .* \\(waiters=0/{self.N}\\)>")
+            self.barrier.abort()
+            self.assertRegex(repr(self.barrier),
+                            f"<*.Barrier object at .* \\(broken\\)>")
+            self.barrier.reset()
+            ps = []
+            for i in range(self.N):
+                p = self.Process(target=self._barrier_wait,
+                                 args=(self.barrier,))
+                p.start()
+                ps.append(p)
+                time.sleep(0.1)
+            for p in ps:
+                p.join()
+
+            self.assertRegex(repr(self.barrier),
+                        f"<*.Barrier object at .* \\(waiters=0/{self.N}\\)>")
+        elif self.TYPE == 'manager':
+            self.assertRegex(repr(self.barrier),
+                            r"<BarrierProxy object, typeid 'Barrier' at .*")
 
     @classmethod
     def multipass(cls, barrier, results, n):
