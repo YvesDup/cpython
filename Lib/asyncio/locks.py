@@ -526,13 +526,12 @@ class Barrier(mixins._LoopBoundMixin):
             except exceptions.CancelledError:
                 raise
             else:
-                index = self._index
                 self._index += 1
+                return self.parties - self._index
             finally:
                 self._count -= 1
                 # Wake up any tasks waiting for barrier to drain.
                 self._exit()
-            return index
 
     async def _block(self):
         # Block until the barrier is ready for us,
