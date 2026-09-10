@@ -153,6 +153,65 @@ Queue
       Raises :exc:`ValueError` if called more times than there were
       items placed in the queue.
 
+   .. warning::
+
+      Mixing calls to *wait* and *nowait* methods can break the FIFO order of
+      the queue.
+
+      In the following example, we create a ``maxsize`` queue of *1* item
+      and insert items *1* and *2* into the queue. The first item is inserted
+      into the queue, the second one is waiting for a free slot.
+
+      The first item *1* is extracted from queue using the :meth:`~Queue.get`
+      method, which also triggers the wake-up of the pending task waiting for
+      a free slot to insert the item *2*. This task is scheduled to run in the
+      next event loop iteration.
+      Than the following :meth:`~Queue.put_nowait` statement is executed immediately
+      and inserts the item *3* into the queue, before the real insertion of the
+      item *2*.
+
+      **FIFO order is broken**.
+
+      .. _asyncio_example_break_fifo:
+
+      .. code-block:: python
+
+         import asyncio
+
+         async def simple_exemple():
+            n = 0
+            q = asyncio.Queue(1)
+
+            asyncio.create_task(q.put(n:=n+1))
+            print(f"put: {n}")
+            asyncio.create_task(q.put(n:=n+1))
+            print(f"put: {n}")
+            await asyncio.sleep(0.0)
+
+            print(f"\tget: {await q.get()}")
+
+            q.put_nowait(n:=n+1)
+            print(f"put: {n}")
+
+            print(f"\tget: {await q.get()}")
+            print(f"\tget: {await q.get()}")
+
+         asyncio.run(simple_exemple())
+
+      The output of this example is:
+
+      .. code-block:: bash
+
+            put: 1
+            put: 2
+               get: 1
+            put: 3
+               get: 3
+               get: 2
+
+      This is due to an **incorrect use** of ``wait`` and ``nowait`` methods,
+      even if it is still possible.
+
 
 Priority Queue
 ==============
