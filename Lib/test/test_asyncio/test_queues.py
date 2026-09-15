@@ -213,6 +213,57 @@ class QueueGetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(queue._getters), 0)
 
+async def test_get_nowait_with_putters(self):
+        # See gh-83055, a fix that prevents calls to `get_nowait()`
+        # and `put()` from being mixed with pending putters.
+        async def _get(q, results):
+            item = await q.get()
+            results.append(item)
+
+        q = asyncio.Queue(1)
+        n = 1
+        results = []
+        g = 3
+        for _ in range(g):
+            asyncio.create_task(_get(q, results))
+        await asyncio.sleep(0.0)
+        self.assertEqual(len(q._getters), g)
+
+        await q.put(n)
+        n += 1
+        g -= 1
+        # queue full: 1 item in queue, 2 items waiting into the _putters
+        self.assertEqual(len(q._getters), g)
+        self.assertEqual(q.qsize(), 1)
+        self.assertTrue(q._is_getter_in_transit)
+
+        # Try to get data by passing pending gets
+        with self.assertRaises(asyncio.QueueWithPendingTasks):
+            item = q.get_nowait()
+            results.append(item)
+
+        await q.put(n)
+        n += 1
+        g -= 1
+        # queue full: 1 item in queue, 1 item waiting into the _putters,
+        # 1 item in transit
+        self.assertEqual(len(q._getters), g)
+        self.assertEqual(q.qsize(), 1)
+        self.assertTrue(q._is_getter_in_transit)
+
+        await q.put(n)
+        n += 1
+        g -= 1
+        # queue full: 1 item in queue, 0 item waiting into the _putters,
+        # 1 item in transit
+        self.assertEqual(len(q._getters), 0)
+        self.assertEqual(q.qsize(), 1)
+        self.assertTrue(q._is_getter_in_transit)
+
+        await asyncio.sleep(0.0)
+        self.assertListEqual(results, list(range(1, n)))
+        self.assertTrue(q.empty())
+
 
 class QueuePutTests(unittest.IsolatedAsyncioTestCase):
 
@@ -430,6 +481,62 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         # If the ValueError is silenced we should catch a CancelledError.
         with self.assertRaises(asyncio.CancelledError):
             await put_task
+
+    async def test_put_nowait_with_getters(self):
+        # See gh-83055, a fix that prevents calls to `put_nowait()`
+        # and `get()` from being mixed with pending getters.
+        size = 1
+        q = asyncio.Queue(size)
+        n = 3
+        results = []
+        for i in range(n):
+            asyncio.create_task(q.put(i+1))
+        await asyncio.sleep(0.0)
+        g = n
+
+        # Queue full: 1 item in queue, 2 items waiting into the _putters
+        self.assertEqual(len(q._putters), g-size)
+        self.assertFalse(q._woken_putter)
+
+        item = await q.get()
+        results.append(item)
+        g -= 1
+        # queue empty: 0 item in queue, 1 item into the _putters,
+        # 1 item in transit
+        self.assertEqual(len(q._putters), g-size)
+        self.assertTrue(q._woken_putter)
+
+        # queue is empty, but put_nowait fails,
+        self.assertTrue(q.empty())
+        with self.assertRaises(asyncio.QueueWithPendingTasks):
+            await q.put_nowait(n+1)
+
+        # get an another item
+        item = await q.get()
+        results.append(item)
+        g -= 1
+        # Queue empty: 0 item in queue, 0 item into the _putters,
+        # 1 item in transit
+        self.assertEqual(len(q._putters), g-size)
+        self.assertTrue(q._woken_putter)
+
+        # queue is empty, but put_nowait fails,
+        self.assertTrue(q.empty())
+        with self.assertRaises(asyncio.QueueWithPendingTasks):
+            await q.put_nowait(n+1)
+
+        # get an another item
+        item = await q.get()
+        results.append(item)
+        g -= 1
+        # Queue empty: 0 item in queue, 0 item into the _putters,
+        # 0 item in transit
+        self.assertEqual(len(q._putters), 0)
+        self.assertFalse(q._woken_putter)
+
+        # This is ends
+        self.assertListEqual(results, list(range(1, n+1)))
+        self.assertTrue(q.empty())
 
 
 class LifoQueueTests(unittest.IsolatedAsyncioTestCase):
