@@ -73,6 +73,9 @@ Queue
 
       Raises :exc:`QueueShutDown` if the queue has been shut down and is empty.
 
+      Raises :exc:`QueueWithPendingTasks` if there are pending get tasks,
+      or if a woken get task is about to get an item from the queue.
+
    .. method:: join()
       :async:
 
@@ -99,6 +102,9 @@ Queue
       If no free slot is immediately available, raise :exc:`QueueFull`.
 
       Raises :exc:`QueueShutDown` if the queue has been shut down.
+
+      Raises :exc:`QueueWithPendingTasks` if there are pending put tasks,
+      or if a woken put task is about to put an item into the queue.
 
    .. method:: qsize()
 
@@ -197,6 +203,20 @@ Exceptions
    on a queue which has been shut down.
 
    .. versionadded:: 3.13
+
+
+.. exception:: QueueWithPendingTasks
+
+   Exception raised when:
+
+   * :meth:`~Queue.put_nowait` is called on a **not full** queue with pending
+     putters exist or a woken putter task is about to put an item into the
+     queue - called **task in transit** -
+
+   * :meth:`~Queue.get_nowait` is called on a **not empty** queue with pending
+     getters exist or a woken getter task is in transit.
+
+   .. versionadded:: 3.16
 
 
 Examples
