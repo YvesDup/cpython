@@ -150,7 +150,7 @@ class Queue(mixins._LoopBoundMixin):
             self._putters.append(putter)
             try:
                 await putter
-            except:
+            except BaseException as e:
                 putter.cancel()  # Just in case putter is not done yet.
                 try:
                     # Clean self._putters from canceled putters.
