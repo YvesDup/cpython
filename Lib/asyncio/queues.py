@@ -53,6 +53,10 @@ class Queue(mixins._LoopBoundMixin):
         self._finished = locks.Event()
         self._finished.set()
         self._init(maxsize)
+        if maxsize <= 0:
+            self.full = self._full_nosize
+        else:
+            self.full = self._full_size
         self._is_shutdown = False
 
     # These three are overridable in subclasses.
@@ -111,6 +115,13 @@ class Queue(mixins._LoopBoundMixin):
         """Return True if the queue is empty, False otherwise."""
         return not self._queue
 
+    def _full_nosize(self):
+        return False
+
+    def _full_size(self):
+        return self.qsize() >= self._maxsize
+
+    '''
     def full(self):
         """Return True if there are maxsize items in the queue.
 
@@ -121,6 +132,7 @@ class Queue(mixins._LoopBoundMixin):
             return False
         else:
             return self.qsize() >= self._maxsize
+    '''
 
     async def put(self, item):
         """Put an item into the queue.
