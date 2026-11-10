@@ -134,6 +134,9 @@ class Queue(mixins._LoopBoundMixin):
         else:
             return self.qsize() >= self._maxsize
 
+    def _exists_putters(self):
+        return self._putters or self._woken_putter > 0
+
     async def put(self, item):
         """Put an item into the queue.
 
@@ -143,12 +146,13 @@ class Queue(mixins._LoopBoundMixin):
         Raises QueueShutDown if the queue has been shut down.
         """
         self._just_woken = False
-        while self.full():
+        while (self.full() or self._exists_putters()) and not self._just_woken:
             if self._is_shutdown:
                 raise QueueShutDown
             putter = self._get_loop().create_future()
             self._putters.append(putter)
             try:
+                print("I gonna get")
                 await putter
                 self._just_woken = True
                 self._woken_putter -= 1
@@ -162,6 +166,7 @@ class Queue(mixins._LoopBoundMixin):
                     # previous get_nowait call or a shutdown call.
                     pass
                 if not self.full() and not putter.cancelled():
+                #if not putter.cancelled():
                     # We were woken up by get_nowait(), but can't take
                     # the call.  Wake up the next in line.
                     self._woken_putter -= 1
@@ -180,7 +185,7 @@ class Queue(mixins._LoopBoundMixin):
             raise QueueShutDown
         if self.full():
             raise QueueFull
-        if not self._just_woken and self._woken_putter > 0:
+        if not self._just_woken and self._exists_putters():
             raise QueueFull("At least a woken putter task is waiting"
                             " to insert an item")
         self._just_woken = False

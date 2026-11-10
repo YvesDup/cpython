@@ -530,10 +530,10 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(q._putters), g-maxsize)
         self.assertEqual(q._woken_putter, 1)
 
-        # queue is empty, but put fails,
+        # queue is empty, put_nowait fails,
         self.assertTrue(q.empty())
         with self.assertRaisesRegex(asyncio.QueueFull, expected_regex=msg):
-            await q.put(n+1)
+            await q.put_nowait(n+1)
 
         # get an another item
         await asyncio.sleep(0)
