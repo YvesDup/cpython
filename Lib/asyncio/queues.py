@@ -152,7 +152,7 @@ class Queue(mixins._LoopBoundMixin):
             putter = self._get_loop().create_future()
             self._putters.append(putter)
             try:
-                print("I gonna get")
+                #print("I gonna get")
                 await putter
                 self._just_woken = True
                 self._woken_putter -= 1
