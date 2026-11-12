@@ -231,14 +231,14 @@ class QueueGetTests(unittest.IsolatedAsyncioTestCase):
         # queue Full: 0 item in queue, 3 tasks into the _getters, 0 woken getter
         self.assertEqual(q.qsize(), 0)
         self.assertEqual(len(q._getters), g)
-        self.assertEqual(q._woken_getter, 0)
+        self.assertEqual(q._woken_getters, 0)
 
         await q.put(n:=n+1)
         g -= 1
         # queue Full: 1 item in queue, 2 tasks into the _getters, 1 woken getter
         self.assertEqual(q.qsize(), maxsize)
         self.assertEqual(len(q._getters), g)
-        self.assertEqual(q._woken_getter, 1)
+        self.assertEqual(q._woken_getters, 1)
 
         await q.put(n:=n+1)
         g -= 1
@@ -246,11 +246,11 @@ class QueueGetTests(unittest.IsolatedAsyncioTestCase):
         # 1 item in transit
         self.assertEqual(q.qsize(), maxsize)
         self.assertEqual(len(q._getters), g)
-        self.assertEqual(q._woken_getter, 1)
+        self.assertEqual(q._woken_getters, 1)
 
-        msg = "At least a woken getter task is waiting"
+        msg = "At least a pending or woken getter task is waiting"
         with self.assertRaisesRegex(asyncio.QueueEmpty, expected_regex=msg):
-            await q.get()
+            await q.get_nowait()
 
         await q.put(n:=n+1)
         g -= 1
@@ -261,13 +261,94 @@ class QueueGetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(q.qsize(), maxsize)
         self.assertEqual(len(q._getters), 0)
-        self.assertEqual(q._woken_getter, 1)
+        self.assertEqual(q._woken_getters, 1)
 
         # This is the end
         await asyncio.sleep(0.0)
         self.assertListEqual(results, list(range(1, n+1)))
-        self.assertEqual(q._woken_getter, 0)
+        self.assertEqual(q._woken_getters, 0)
         self.assertTrue(q.empty())
+
+    async def test_get_nowait_does_not_bypass_woken_getters(self):
+        # gh-83055:
+        async def _get(q, results):
+            item = await q.get()
+            results.append(item)
+
+        q = asyncio.Queue(1)
+        results = []
+        get_1 = asyncio.create_task(_get(q, results))
+        get_2 = asyncio.create_task(_get(q, results))
+        await asyncio.sleep(0)
+        self.assertEqual(q._woken_getters, 0)
+        self.assertTrue(q.empty())
+
+        q.put_nowait(1)
+        self.assertEqual(q._woken_getters, 1)
+        self.assertFalse(q.empty())
+
+        with self.assertRaises(asyncio.QueueEmpty):
+            q.get_nowait()
+
+        asyncio.create_task(q.put(2))
+        await get_1
+        await get_2
+        self.assertEqual(sorted(results), [1, 2])
+        self.assertEqual(q._woken_getters, 0)
+
+    """
+    #async def test_put_nowait_dont_uses_unreserved_slots(self):
+    async def test_get_nowait_does_not_bypass_getters(self):
+        async def _get(q, results):
+            item = await q.get()
+            results.append(item)
+
+        q = asyncio.Queue(1)
+        results = []
+        q.put_nowait(1)
+        get_1 = asyncio.create_task(_get(q, results))
+        get_2 = asyncio.create_task(_get(q, results))
+        self.assertEqual(q._woken_getters, 0)
+
+        with self.assertRaises(asyncio.QueueEmpty):
+            q.get_nowait()
+
+        asyncio.create_task(q.put(1))
+        asyncio.create_task(q.put(2))
+        await get_1
+        await get_2
+        self.assertEqual(sorted(results), [1, 2])
+        self.assertEqual(q._woken_getters, 0)
+    """
+
+    async def test_cancelled_woken_getters_passes_to_next(self):
+        q = asyncio.Queue(1)
+        get_1 = asyncio.create_task(q.get())
+        get_2 = asyncio.create_task(q.get())
+        await asyncio.sleep(0)
+        q.put_nowait(1)
+
+        get_1.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await get_1
+        self.assertEqual(await get_2, 1)
+        self.assertEqual(q._woken_getters, 0)
+        self.assertTrue(q.empty())
+
+    async def test_shutdown_with_woken_getters(self):
+        q = asyncio.Queue(1)
+        get_1 = asyncio.create_task(q.get())
+        get_2 = asyncio.create_task(q.get())
+        await asyncio.sleep(0)
+        self.assertEqual(q._woken_getters, 0)
+
+        q.put_nowait(0)
+        self.assertEqual(q._woken_getters, 1)
+        q.shutdown()
+        print(get_2._state, q._woken_getters)
+        with self.assertRaises(asyncio.QueueShutDown):
+            await get_2
+        self.assertEqual(q._woken_getters, 0)
 
 
 class QueuePutTests(unittest.IsolatedAsyncioTestCase):
@@ -502,7 +583,7 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         # Queue full: 1 item in queue, 2 items waiting into the _putters
         self.assertEqual(q.qsize(), maxsize)
         self.assertEqual(len(q._putters), g-maxsize)
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
 
         item = await q.get()
         results.append(item)
@@ -511,11 +592,11 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         # 1 item in transit
         self.assertEqual(q.qsize(), 0)
         self.assertEqual(len(q._putters), g-maxsize)
-        self.assertEqual(q._woken_putter, 1)
+        self.assertEqual(q._woken_putters, 1)
 
         # queue is empty, but put_nowait fails,
         self.assertTrue(q.empty())
-        msg = 'At least a woken putter task is waiting'
+        msg = 'At least a pending or woken putter task is waiting'
         with self.assertRaisesRegex(asyncio.QueueFull, expected_regex=msg):
             q.put_nowait(n+1)
 
@@ -528,7 +609,7 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         # 1 item in transit
         self.assertEqual(q.qsize(), 0)
         self.assertEqual(len(q._putters), g-maxsize)
-        self.assertEqual(q._woken_putter, 1)
+        self.assertEqual(q._woken_putters, 1)
 
         # queue is empty, put_nowait fails,
         self.assertTrue(q.empty())
@@ -544,13 +625,13 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         # 0 item in transit
         self.assertEqual(q.qsize(), 0)
         self.assertEqual(len(q._putters), 0)
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
 
         # This is the end
         self.assertListEqual(results, list(range(1, n+1)))
         self.assertTrue(q.empty())
 
-    async def test_put_nowait_does_not_steal_slot_from_woken_putter(self):
+    async def test_put_nowait_does_not_steal_slot_from_woken_putters(self):
         # gh-83055: the slot freed by get_nowait() belongs to the
         # woken putter until it runs.
         q = asyncio.Queue(1)
@@ -568,9 +649,9 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await q.get(), 2)
         await put_1
         await put_2
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
 
-    async def test_put_nowait_uses_unreserved_slots(self):
+    async def test_put_nowait_does_not_uses_unreserved_slots(self):
         q = asyncio.Queue(2)
         q.put_nowait(1)
         q.put_nowait(2)
@@ -587,7 +668,7 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
         q.put_nowait(4)
         self.assertTrue(q.full())
         self.assertEqual([q.get_nowait(), q.get_nowait()], [3, 4])
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
 
     async def test_put_order_with_many_putters(self):
         # gh-83055: items must be got in the order put() was called.
@@ -613,9 +694,9 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0)
 
         self.assertEqual(items, sorted(items))
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
 
-    async def test_cancelled_woken_putter_passes_slot_to_next(self):
+    async def test_cancelled_woken_putters_passes_slot_to_next(self):
         q = asyncio.Queue(1)
         q.put_nowait(0)
         put_1 = asyncio.create_task(q.put(1))
@@ -628,20 +709,21 @@ class QueuePutTests(unittest.IsolatedAsyncioTestCase):
             await put_1
         await put_2
         self.assertEqual(q.get_nowait(), 2)
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
         self.assertFalse(q.full())
 
-    async def test_shutdown_with_woken_putter(self):
+    async def test_shutdown_with_woken_putters(self):
         q = asyncio.Queue(1)
         q.put_nowait(0)
         put_1 = asyncio.create_task(q.put(1))
         await asyncio.sleep(0)
 
         q.get_nowait()
+        self.assertEqual(q._woken_putters, 1)
         q.shutdown()
         with self.assertRaises(asyncio.QueueShutDown):
             await put_1
-        self.assertEqual(q._woken_putter, 0)
+        self.assertEqual(q._woken_putters, 0)
 
 
 class LifoQueueTests(unittest.IsolatedAsyncioTestCase):

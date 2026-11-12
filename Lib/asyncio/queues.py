@@ -55,8 +55,8 @@ class Queue(mixins._LoopBoundMixin):
         self._init(maxsize)
         self._is_shutdown = False
         # See gh-83055
-        self._woken_getter = 0
-        self._woken_putter = 0
+        self._woken_getters = 0
+        self._woken_putters = 0
         self._just_woken = False
 
     # These three are overridable in subclasses.
@@ -74,19 +74,15 @@ class Queue(mixins._LoopBoundMixin):
 
     def _wakeup_next(self, waiters):
         # Wake up the next waiter (if any) that isn't cancelled.
-        woken = 0
         while waiters:
             waiter = waiters.popleft()
             if not waiter.done():
                 waiter.set_result(None)
-                woken = 1
+                if waiters is self._getters:
+                    self._woken_getters += 1
+                else:
+                    self._woken_putters += 1
                 break
-
-        if woken:
-            if waiters is self._getters:
-                self._woken_getter += woken
-            else:
-                self._woken_putter += woken
 
     def __repr__(self):
         return f'<{type(self).__name__} at {id(self):#x} {self._format()}>'
@@ -100,10 +96,14 @@ class Queue(mixins._LoopBoundMixin):
         result = f'maxsize={self._maxsize!r}'
         if getattr(self, '_queue', None):
             result += f' _queue={list(self._queue)!r}'
-        if self._getters or self._woken_getter:
+        if self._getters:
             result += f' _getters[{len(self._getters)}]'
-        if self._putters or self._woken_putter:
+        if self._woken_getters > 0:
+            result += f'_woken[{self._woken_getters}]'
+        if self._putters or self._woken_putters > 0:
             result += f' _putters[{len(self._putters)}]'
+        if self._woken_putters > 0:
+            result += f'_woken[{self._woken_putters}]'
         if self._unfinished_tasks:
             result += f' tasks={self._unfinished_tasks}'
         if self._is_shutdown:
@@ -134,9 +134,6 @@ class Queue(mixins._LoopBoundMixin):
         else:
             return self.qsize() >= self._maxsize
 
-    def _exists_putters(self):
-        return self._putters or self._woken_putter > 0
-
     async def put(self, item):
         """Put an item into the queue.
 
@@ -152,10 +149,9 @@ class Queue(mixins._LoopBoundMixin):
             putter = self._get_loop().create_future()
             self._putters.append(putter)
             try:
-                #print("I gonna get")
                 await putter
                 self._just_woken = True
-                self._woken_putter -= 1
+                self._woken_putters -= 1
             except:
                 putter.cancel()  # Just in case putter is not done yet.
                 try:
@@ -166,13 +162,15 @@ class Queue(mixins._LoopBoundMixin):
                     # previous get_nowait call or a shutdown call.
                     pass
                 if not self.full() and not putter.cancelled():
-                #if not putter.cancelled():
                     # We were woken up by get_nowait(), but can't take
                     # the call.  Wake up the next in line.
-                    self._woken_putter -= 1
+                    self._woken_putters -= 1
                     self._wakeup_next(self._putters)
                 raise
-        self.put_nowait(item)
+        return self.put_nowait(item)
+
+    def _exists_putters(self):
+        return self._putters or self._woken_putters > 0
 
     def put_nowait(self, item):
         """Put an item into the queue without blocking.
@@ -186,8 +184,8 @@ class Queue(mixins._LoopBoundMixin):
         if self.full():
             raise QueueFull
         if not self._just_woken and self._exists_putters():
-            raise QueueFull("At least a woken putter task is waiting"
-                            " to insert an item")
+            raise QueueFull("At least a pending or woken putter task"
+                            " is waiting to insert an item")
         self._just_woken = False
         self._put(item)
         self._unfinished_tasks += 1
@@ -203,7 +201,7 @@ class Queue(mixins._LoopBoundMixin):
         or if the queue has been shut down immediately.
         """
         self._just_woken = False
-        while self.empty():
+        while (self.empty() or self._exists_getters()) and not self._just_woken:
             if self._is_shutdown:
                 raise QueueShutDown
             getter = self._get_loop().create_future()
@@ -211,7 +209,7 @@ class Queue(mixins._LoopBoundMixin):
             try:
                 await getter
                 self._just_woken = True
-                self._woken_getter -= 1
+                self._woken_getters -= 1
             except:
                 getter.cancel()  # Just in case getter is not done yet.
                 try:
@@ -224,10 +222,13 @@ class Queue(mixins._LoopBoundMixin):
                 if not self.empty() and not getter.cancelled():
                     # We were woken up by put_nowait(), but can't take
                     # the call.  Wake up the next in line.
-                    self._woken_getter -= 1
+                    self._woken_getters -= 1
                     self._wakeup_next(self._getters)
                 raise
         return self.get_nowait()
+
+    def _exists_getters(self):
+        return self._getters or self._woken_getters > 0
 
     def get_nowait(self):
         """Remove and return an item from the queue.
@@ -242,8 +243,8 @@ class Queue(mixins._LoopBoundMixin):
             if self._is_shutdown:
                 raise QueueShutDown
             raise QueueEmpty
-        if not self._just_woken and self._woken_getter > 0:
-            raise QueueEmpty("At least a woken getter task is"
+        if not self._just_woken and self._exists_getters():
+            raise QueueEmpty("At least a pending or woken getter task is"
                              " waiting to get an item")
         self._just_woken = False
         item = self._get()
@@ -307,10 +308,12 @@ class Queue(mixins._LoopBoundMixin):
             getter = self._getters.popleft()
             if not getter.done():
                 getter.set_result(None)
+                self._woken_getters += 1
         while self._putters:
             putter = self._putters.popleft()
             if not putter.done():
                 putter.set_result(None)
+                self._woken_putters += 1
 
 
 class PriorityQueue(Queue):
