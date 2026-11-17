@@ -197,6 +197,7 @@ class Queue(object):
                     continue
                 return res
         finally:
+            print("after_marker".center(80, '+'))
             self._put_marker()
 
     def get(self, block=True, timeout=None):
@@ -289,11 +290,13 @@ class Queue(object):
             if self._sem._semlock._is_zero():
                 self._release_slot()
             # Wake a blocked getter; it wakes the next one.
+            print("shutdown put_marker".center(80, '#'))
             self._put_marker()
         if immediate:
             self._discard_all()
 
     def _discard_all(self):
+        print("discard all".center(80, "#"))
         discard = self._make_discarder()
         # Items this process has buffered.  Feeder threads, here and in
         # other processes, discard what they hold on seeing the flag.
@@ -303,9 +306,11 @@ class Queue(object):
             n = len(self._buffer) - len(keep)
             self._buffer.clear()
             self._buffer.extend(keep)
+            print(f"discard_all keep with {n = }".center(80, "#"))
         if n:
             discard(n)
             # A getter may be waiting for one of them.
+            print(f"discard_all put_marke".center(80, "#"))
             self._put_marker()
         # Items already in the pipe.
         wlock = self._wlock
@@ -333,9 +338,12 @@ class Queue(object):
                     while self._poll():
                         if self._recv_bytes():
                             n += 1
-                    self._send_bytes(b'')
+                    self._put_marker()
+                    print(f"discard_all put_marker".center(80, "#"))
+                    #self._send_bytes(b'')
                 finally:
                     wlock.release()
+            print(f"discard_all discard {n = }".center(80, "#"))
             discard(n)
 
     def qsize(self):
@@ -467,18 +475,17 @@ class Queue(object):
         if sys.platform != 'win32':
             wacquire = writelock.acquire
             wrelease = writelock.release
-        else:
-            wacquire = None
-
-        def send(data):
-            if wacquire is None:
-                send_bytes(data)
-            else:
-                wacquire()
-                try:
+            def send(data):
+                if wacquire is None:
                     send_bytes(data)
-                finally:
-                    wrelease()
+                else:
+                    wacquire()
+                    try:
+                        send_bytes(data)
+                    finally:
+                        wrelease()
+        else:
+            send = send_bytes
 
         while 1:
             is_item = False
@@ -500,13 +507,16 @@ class Queue(object):
                                 # discarded items: wake it.
                                 discard(ndiscarded)
                                 ndiscarded = 0
+                                print("feeder ndiscarded send(b'')".center(80,'-'))
                                 send(b'')
                             if obj is sentinel:
                                 debug('feeder thread got sentinel -- exiting')
                                 reader_close()
                                 writer_close()
+                                print("feeder sentinel".center(80,'-'))
                                 return
                             # An empty message is never a valid pickle.
+                            print("feeder marker send(b'')".center(80,'-'))
                             send(b'')
                             continue
 
@@ -525,6 +535,7 @@ class Queue(object):
                 except IndexError:
                     if ndiscarded:
                         discard(ndiscarded)
+                        print("feeder indexerror ndiscarded send(b'')".center(80,'-'))
                         send(b'')
             except Exception as e:
                 if ignore_epipe and getattr(e, 'errno', 0) == errno.EPIPE:
