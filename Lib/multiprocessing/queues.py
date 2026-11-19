@@ -114,7 +114,8 @@ class Queue(object):
 
     def _release_slot(self):
         try:
-            self._sem.release()
+            with self._state_lock:
+                self._sem.release()
         except ValueError:
             # shutdown() may have released _sem once more than there were
             # items, to wake the blocked putters.
@@ -197,8 +198,8 @@ class Queue(object):
                     continue
                 return res
         finally:
-            #print\("after_marker".center(80, '+'))
             self._put_marker()
+            #print\("after_marker _put_marker() ".center(80, '+'))
 
     def get(self, block=True, timeout=None):
         if self._closed:
@@ -268,7 +269,8 @@ class Queue(object):
                     with state_lock:
                         outstanding.acquire(False)
                 try:
-                    sem.release()
+                    with state_lock:
+                        sem.release()
                 except ValueError:
                     pass
         return discard
@@ -287,16 +289,17 @@ class Queue(object):
             # Wake a putter blocked on a full queue; it wakes the next one.
             # Putters which acquire a unit from now on give it back, so
             # there is nothing to do if the queue is not full.
-            if self._sem._semlock._is_zero():
+            q_full = False
+            with self._state_lock:
+                q_full = self._sem._semlock._is_zero()
+            if q_full:
                 self._release_slot()
             # Wake a blocked getter; it wakes the next one.
-            #print\("shutdown put_marker".center(80, '#'))
             self._put_marker()
         if immediate:
             self._discard_all()
 
     def _discard_all(self):
-        #print\("discard all".center(80, "#"))
         discard = self._make_discarder()
         # Items this process has buffered.  Feeder threads, here and in
         # other processes, discard what they hold on seeing the flag.
@@ -306,11 +309,9 @@ class Queue(object):
             n = len(self._buffer) - len(keep)
             self._buffer.clear()
             self._buffer.extend(keep)
-            #print\(f"discard_all keep with {n = }".center(80, "#"))
         if n:
             discard(n)
             # A getter may be waiting for one of them.
-            #print\(f"discard_all put_marke".center(80, "#"))
             self._put_marker()
         # Items already in the pipe.
         wlock = self._wlock
@@ -338,12 +339,9 @@ class Queue(object):
                     while self._poll():
                         if self._recv_bytes():
                             n += 1
-                    self._put_marker()
-                    #print\(f"discard_all put_marker".center(80, "#"))
-                    #self._send_bytes(b'')
+                    self._send_bytes(b'')
                 finally:
                     wlock.release()
-            #print\(f"discard_all discard {n = }".center(80, "#"))
             discard(n)
 
     def qsize(self):
@@ -358,7 +356,8 @@ class Queue(object):
         return not self._poll()
 
     def full(self):
-        return self._sem._semlock._is_zero()
+        with self._state_lock:
+            return self._sem._semlock._is_zero()
 
     def get_nowait(self):
         return self.get(False)
@@ -558,6 +557,7 @@ class Queue(object):
                         if shutdown:
                             # A getter may be waiting for this item.
                             buffer.appendleft(marker)
+                            #print\("feeder exception appendleft(marker)".center(80,'-'))
                     onerror(e, obj)
 
     @staticmethod
